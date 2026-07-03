@@ -7,7 +7,12 @@
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "light",
     "ios": {
-      "supportsTablet": true
+      "supportsTablet": true,
+      "bundleIdentifier": "com.yunyun.bountyfaceapp",
+      "infoPlist": {
+        "NSCameraUsageDescription": "BountyFace needs camera access to detect faces.",
+        "ITSAppUsesNonExemptEncryption": false
+      }
     },
     "android": {
       "adaptiveIcon": {
@@ -16,13 +21,25 @@
         "backgroundImage": "./assets/android-icon-background.png",
         "monochromeImage": "./assets/android-icon-monochrome.png"
       },
-      "predictiveBackGestureEnabled": false
+      "predictiveBackGestureEnabled": false,
+      "permissions": ["android.permission.CAMERA"]
     },
     "web": {
       "favicon": "./assets/favicon.png"
     },
     "plugins": [
-      "expo-asset"
-    ]
+      [
+        "react-native-vision-camera",
+        {
+          "cameraPermissionText": "Allow BountyFace to access your camera for face detection.",
+          "enableMicrophonePermission": false
+        }
+      ]
+    ],
+    "extra": {
+      "eas": {
+        "projectId": "23a85913-4974-4d95-b96a-eb8f4c3eef1e"
+      }
+    }
   }
 }
