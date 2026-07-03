@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
+  Animated,
+  Easing,
   Pressable,
   SafeAreaView,
   StyleSheet,
@@ -44,13 +46,17 @@ const MAX_CENTER_OFFSET_RATIO = 0.16;
 export function CameraScreen() {
   const { width: screenWidth, height: screenHeight } = useWindowDimensions();
   const { hasPermission, requestPermission } = useCameraPermission();
-  const device = useCameraDevice('front');
+  const [cameraFacing, setCameraFacing] = useState<'back' | 'front'>('back');
+  const device = useCameraDevice(cameraFacing);
   const camera = useRef<Camera>(null);
   const [permissionChecked, setPermissionChecked] = useState(false);
   const [status, setStatus] = useState<ScanStatus>('Searching target...');
   const [faceBounds, setFaceBounds] = useState<FaceBounds | null>(null);
   const stableSince = useRef<number | null>(null);
   const lastStatus = useRef<ScanStatus>('Searching target...');
+  const scanProgress = useRef(new Animated.Value(0)).current;
+  const lockPulse = useRef(new Animated.Value(0)).current;
+  const threatProgress = useRef(new Animated.Value(0)).current;
 
   useEffect(() => {
     Camera.getCameraPermissionStatus();
@@ -67,10 +73,88 @@ export function CameraScreen() {
     autoMode: true,
     windowWidth: screenWidth,
     windowHeight: screenHeight,
-  }), [screenHeight, screenWidth]);
+    cameraFacing,
+  }), [cameraFacing, screenHeight, screenWidth]);
   const { detectFaces, stopListeners } = useFaceDetector(detectionOptions);
 
   useEffect(() => stopListeners, [stopListeners]);
+
+  useEffect(() => {
+    stableSince.current = null;
+    lastStatus.current = 'Searching target...';
+    setStatus('Searching target...');
+    setFaceBounds(null);
+  }, [cameraFacing]);
+
+  const hasFace = faceBounds !== null;
+  const isLocked = status === 'Target locked';
+
+  useEffect(() => {
+    if (!hasFace || isLocked) {
+      scanProgress.stopAnimation();
+      scanProgress.setValue(0);
+      return;
+    }
+
+    const animation = Animated.loop(
+      Animated.timing(scanProgress, {
+        toValue: 1,
+        duration: 1100,
+        easing: Easing.inOut(Easing.linear),
+        useNativeDriver: true,
+      }),
+    );
+    animation.start();
+    return () => animation.stop();
+  }, [hasFace, isLocked, scanProgress]);
+
+  useEffect(() => {
+    if (status !== 'Locking...') {
+      lockPulse.stopAnimation();
+      Animated.timing(lockPulse, {
+        toValue: isLocked ? 1 : 0,
+        duration: 180,
+        useNativeDriver: true,
+      }).start();
+      return;
+    }
+
+    const animation = Animated.loop(
+      Animated.sequence([
+        Animated.timing(lockPulse, {
+          toValue: 1,
+          duration: 320,
+          easing: Easing.out(Easing.quad),
+          useNativeDriver: true,
+        }),
+        Animated.timing(lockPulse, {
+          toValue: 0,
+          duration: 320,
+          easing: Easing.in(Easing.quad),
+          useNativeDriver: true,
+        }),
+      ]),
+    );
+    animation.start();
+    return () => animation.stop();
+  }, [isLocked, lockPulse, status]);
+
+  useEffect(() => {
+    const progressByStatus: Record<ScanStatus, number> = {
+      'Searching target...': 0,
+      'Move closer': 0.25,
+      'Face forward': 0.5,
+      'Locking...': 0.78,
+      'Target locked': 1,
+    };
+
+    Animated.timing(threatProgress, {
+      toValue: progressByStatus[status],
+      duration: 260,
+      easing: Easing.out(Easing.cubic),
+      useNativeDriver: false,
+    }).start();
+  }, [status, threatProgress]);
 
   const updateStatus = useCallback((nextStatus: ScanStatus) => {
     if (lastStatus.current !== nextStatus) {
@@ -166,12 +250,10 @@ export function CameraScreen() {
   if (!device) {
     return (
       <View style={styles.centered}>
-        <Text style={styles.message}>Front camera unavailable</Text>
+        <Text style={styles.message}>Camera unavailable</Text>
       </View>
     );
   }
-
-  const isLocked = status === 'Target locked';
 
   return (
     <View style={styles.screen}>
@@ -184,14 +266,27 @@ export function CameraScreen() {
         pixelFormat="yuv"
       />
 
-      <SafeAreaView pointerEvents="none" style={styles.overlay}>
+      <SafeAreaView pointerEvents="box-none" style={styles.overlay}>
         <View style={styles.header}>
           <Text style={styles.brand}>BOUNTYFACE</Text>
-          <View style={[styles.liveDot, isLocked && styles.lockedDot]} />
+          <View style={styles.headerActions}>
+            <View style={[styles.liveDot, isLocked && styles.lockedDot]} />
+            <Pressable
+              accessibilityLabel={cameraFacing === 'back' ? '切換為自拍鏡頭' : '切換為後鏡頭'}
+              accessibilityRole="button"
+              hitSlop={8}
+              style={({ pressed }) => [styles.flipButton, pressed && styles.flipButtonPressed]}
+              onPress={() => setCameraFacing((current) => current === 'back' ? 'front' : 'back')}
+            >
+              <Text style={styles.flipButtonText}>
+                {cameraFacing === 'back' ? '自拍' : '後鏡頭'}
+              </Text>
+            </Pressable>
+          </View>
         </View>
 
         {faceBounds && (
-          <View
+          <Animated.View
             style={[
               styles.faceBox,
               isLocked && styles.faceBoxLocked,
@@ -200,14 +295,82 @@ export function CameraScreen() {
                 top: faceBounds.y,
                 width: faceBounds.width,
                 height: faceBounds.height,
+                opacity: lockPulse.interpolate({
+                  inputRange: [0, 1],
+                  outputRange: [0.82, 1],
+                }),
+                transform: [{
+                  scale: lockPulse.interpolate({
+                    inputRange: [0, 1],
+                    outputRange: [1, isLocked ? 1.015 : 1.035],
+                  }),
+                }],
               },
             ]}
-          />
+          >
+            <View style={[styles.corner, styles.cornerTopLeft]} />
+            <View style={[styles.corner, styles.cornerTopRight]} />
+            <View style={[styles.corner, styles.cornerBottomLeft]} />
+            <View style={[styles.corner, styles.cornerBottomRight]} />
+            {!isLocked && (
+              <Animated.View
+                style={[
+                  styles.scanLine,
+                  {
+                    transform: [{
+                      translateY: scanProgress.interpolate({
+                        inputRange: [0, 1],
+                        outputRange: [2, Math.max(2, faceBounds.height - 4)],
+                      }),
+                    }],
+                  },
+                ]}
+              />
+            )}
+            {isLocked && (
+              <View style={styles.lockBadge}>
+                <Text style={styles.lockBadgeText}>LOCK</Text>
+              </View>
+            )}
+          </Animated.View>
         )}
 
         <View style={styles.statusPanel}>
-          <Text style={styles.statusLabel}>FACE ACQUISITION</Text>
-          <Text style={[styles.status, isLocked && styles.statusLocked]}>{status}</Text>
+          <View style={styles.statusHeading}>
+            <View>
+              <Text style={styles.statusLabel}>FACE ACQUISITION</Text>
+              <Text style={[styles.status, isLocked && styles.statusLocked]}>{status}</Text>
+            </View>
+            <Text style={[styles.readyState, isLocked && styles.readyStateLocked]}>
+              {isLocked ? 'READY' : 'SCANNING'}
+            </Text>
+          </View>
+
+          <View style={styles.threatPanel}>
+            <View style={styles.threatHeader}>
+              <Text style={styles.threatLabel}>THREAT SIGNAL</Text>
+              <Text style={styles.threatValue}>{isLocked ? '100%' : 'CALIBRATING'}</Text>
+            </View>
+            <View style={styles.threatTrack}>
+              <Animated.View
+                style={[
+                  styles.threatFill,
+                  isLocked && styles.threatFillLocked,
+                  {
+                    width: threatProgress.interpolate({
+                      inputRange: [0, 1],
+                      outputRange: ['0%', '100%'],
+                    }),
+                  },
+                ]}
+              />
+            </View>
+            <View style={styles.metricsRow}>
+              <Text style={styles.metric}>FACE {hasFace ? 'ON' : '--'}</Text>
+              <Text style={styles.metric}>ALIGN {status === 'Face forward' ? 'ADJUST' : hasFace ? 'OK' : '--'}</Text>
+              <Text style={styles.metric}>LOCK {isLocked ? 'YES' : 'NO'}</Text>
+            </View>
+          </View>
         </View>
       </SafeAreaView>
     </View>
@@ -254,15 +417,53 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(5, 8, 7, 0.68)',
   },
   brand: { color: '#ffffff', fontSize: 16, fontWeight: '800' },
+  headerActions: { flexDirection: 'row', alignItems: 'center', gap: 14 },
   liveDot: { width: 9, height: 9, borderRadius: 5, backgroundColor: '#f0c85a' },
   lockedDot: { backgroundColor: '#7ef9c6' },
+  flipButton: {
+    minWidth: 62,
+    height: 36,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1,
+    borderColor: 'rgba(126, 249, 198, 0.7)',
+    borderRadius: 6,
+    backgroundColor: 'rgba(5, 8, 7, 0.76)',
+  },
+  flipButtonPressed: { backgroundColor: 'rgba(126, 249, 198, 0.24)' },
+  flipButtonText: { color: '#ffffff', fontSize: 14, fontWeight: '700' },
   faceBox: {
     position: 'absolute',
-    borderWidth: 2,
-    borderColor: '#f0c85a',
+    borderWidth: 1,
+    borderColor: 'rgba(240, 200, 90, 0.62)',
     backgroundColor: 'transparent',
   },
-  faceBoxLocked: { borderColor: '#7ef9c6', borderWidth: 3 },
+  faceBoxLocked: { borderColor: 'rgba(126, 249, 198, 0.72)', borderWidth: 1 },
+  corner: { position: 'absolute', width: 24, height: 24, borderColor: '#f0c85a' },
+  cornerTopLeft: { top: -2, left: -2, borderTopWidth: 4, borderLeftWidth: 4 },
+  cornerTopRight: { top: -2, right: -2, borderTopWidth: 4, borderRightWidth: 4 },
+  cornerBottomLeft: { bottom: -2, left: -2, borderBottomWidth: 4, borderLeftWidth: 4 },
+  cornerBottomRight: { right: -2, bottom: -2, borderRightWidth: 4, borderBottomWidth: 4 },
+  scanLine: {
+    position: 'absolute',
+    top: 0,
+    left: 5,
+    right: 5,
+    height: 2,
+    backgroundColor: '#7ef9c6',
+    shadowColor: '#7ef9c6',
+    shadowOpacity: 0.9,
+    shadowRadius: 5,
+  },
+  lockBadge: {
+    position: 'absolute',
+    right: 8,
+    bottom: 8,
+    paddingHorizontal: 7,
+    paddingVertical: 4,
+    backgroundColor: '#7ef9c6',
+  },
+  lockBadgeText: { color: '#07110d', fontSize: 10, fontWeight: '900' },
   statusPanel: {
     margin: 20,
     marginBottom: 28,
@@ -272,7 +473,19 @@ const styles = StyleSheet.create({
     borderLeftColor: '#7ef9c6',
     backgroundColor: 'rgba(5, 8, 7, 0.82)',
   },
+  statusHeading: { flexDirection: 'row', alignItems: 'flex-start', justifyContent: 'space-between' },
   statusLabel: { color: '#94a59e', fontSize: 11, fontWeight: '700' },
   status: { marginTop: 5, color: '#ffffff', fontSize: 24, fontWeight: '700' },
   statusLocked: { color: '#7ef9c6' },
+  readyState: { color: '#f0c85a', fontSize: 11, fontWeight: '800' },
+  readyStateLocked: { color: '#7ef9c6' },
+  threatPanel: { marginTop: 16, borderTopWidth: 1, borderTopColor: 'rgba(148, 165, 158, 0.3)', paddingTop: 12 },
+  threatHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+  threatLabel: { color: '#94a59e', fontSize: 10, fontWeight: '700' },
+  threatValue: { color: '#d8e2de', fontSize: 10, fontWeight: '700' },
+  threatTrack: { height: 5, marginTop: 8, overflow: 'hidden', backgroundColor: 'rgba(148, 165, 158, 0.24)' },
+  threatFill: { height: '100%', backgroundColor: '#f0c85a' },
+  threatFillLocked: { backgroundColor: '#7ef9c6' },
+  metricsRow: { flexDirection: 'row', justifyContent: 'space-between', marginTop: 10 },
+  metric: { color: '#94a59e', fontSize: 9, fontWeight: '700' },
 });
