@@ -16,20 +16,27 @@ import {
   useCameraDevice,
   useCameraPermission,
   useFrameProcessor,
+  VisionCameraProxy,
 } from 'react-native-vision-camera';
-import type {
-  Face,
-  FaceDetectionOptions,
-} from 'react-native-vision-camera-face-detector';
-import { useFaceDetector } from 'react-native-vision-camera-face-detector';
 import { Worklets } from 'react-native-worklets-core';
 
+type ScanMode = 'selfie' | 'field';
+
 type ScanStatus =
-  | 'Searching target...'
-  | 'Move closer'
-  | 'Face forward'
-  | 'Locking...'
-  | 'Target locked';
+  | 'idle'
+  | 'searchingFace'
+  | 'faceDetected'
+  | 'faceLocked'
+  | 'tracking'
+  | 'lostTracking'
+  | 'analyzing'
+  | 'completed';
+
+type MockProfile = {
+  name: string;
+  level: number;
+  bounty: string;
+};
 
 type FaceBounds = {
   x: number;
@@ -38,22 +45,152 @@ type FaceBounds = {
   height: number;
 };
 
+type PoseLandmark = {
+  x: number;
+  y: number;
+  z: number;
+  visibility?: number;
+};
+
+type ScreenPoint = {
+  x: number;
+  y: number;
+  visible: boolean;
+};
+
+type NativeFace = {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  yawAngle?: number;
+  rollAngle?: number;
+};
+
+type DetectedFace = {
+  bounds: FaceBounds;
+  yawAngle?: number;
+  rollAngle?: number;
+};
+
+type NativeScanResult = {
+  faces?: NativeFace[];
+  landmarks?: PoseLandmark[];
+};
+
+type PoseQuality = {
+  hasHead: boolean;
+  hasShoulders: boolean;
+  hasUpperBody: boolean;
+  hasArms: boolean;
+  hasFullBody: boolean;
+  isFacingCamera: boolean;
+  confidence: number;
+};
+
+const posePlugin = VisionCameraProxy.initFrameProcessorPlugin('poseLandmarker', {});
+
 const REQUIRED_STABLE_MS = 1000;
 const MAX_ANGLE = 14;
-const MIN_FACE_WIDTH_RATIO = 0.3;
+const MIN_SELFIE_FACE_WIDTH_RATIO = 0.3;
+const MIN_FIELD_FACE_WIDTH_RATIO = 0.1;
 const MAX_CENTER_OFFSET_RATIO = 0.16;
+const MIN_LANDMARK_VISIBILITY = 0.45;
+const POSE_CONNECTIONS: Array<[number, number]> = [
+  [11, 12],
+  [11, 13],
+  [13, 15],
+  [12, 14],
+  [14, 16],
+  [11, 23],
+  [12, 24],
+  [23, 24],
+  [23, 25],
+  [25, 27],
+  [24, 26],
+  [26, 28],
+];
+const DISPLAYED_LANDMARKS = [0, 11, 12, 13, 14, 15, 16, 23, 24, 25, 26, 27, 28];
+const STATUS_PROGRESS: Record<ScanStatus, number> = {
+  idle: 0,
+  searchingFace: 0,
+  faceDetected: 0.25,
+  faceLocked: 0.5,
+  tracking: 0.8,
+  lostTracking: 0.8,
+  analyzing: 0.9,
+  completed: 1,
+};
+const STATUS_COPY: Record<ScanStatus, string> = {
+  idle: 'Scanner ready',
+  searchingFace: 'Searching for face...',
+  faceDetected: 'Checking face quality...',
+  faceLocked: 'Face locked',
+  tracking: 'Target tracking',
+  lostTracking: 'Signal lost...',
+  analyzing: 'Analyzing target...',
+  completed: 'Scan completed',
+};
+
+const LOST_TRACKING_TIMEOUT_MS = 1000;
+const LOCK_CACHE_MS = 5000;
+
+const EMPTY_POSE_QUALITY: PoseQuality = {
+  hasHead: false,
+  hasShoulders: false,
+  hasUpperBody: false,
+  hasArms: false,
+  hasFullBody: false,
+  isFacingCamera: false,
+  confidence: 0,
+};
+
+function evaluatePose(landmarks: PoseLandmark[] | null): PoseQuality {
+  if (!landmarks || landmarks.length < 33) {
+    return EMPTY_POSE_QUALITY;
+  }
+
+  const isVisible = (index: number) => (landmarks[index]?.visibility ?? 0) >= MIN_LANDMARK_VISIBILITY;
+  const allVisible = (indices: number[]) => indices.every(isVisible);
+  const confidenceIndices = [0, 11, 12, 13, 14, 15, 16, 23, 24, 25, 26, 27, 28];
+  const confidence = confidenceIndices.reduce(
+    (sum, index) => sum + (landmarks[index]?.visibility ?? 0),
+    0,
+  ) / confidenceIndices.length;
+  const hasHead = isVisible(0);
+  const hasShoulders = allVisible([11, 12]);
+  const hasUpperBody = hasShoulders && allVisible([23, 24]);
+  const hasArms = allVisible([13, 14, 15, 16]);
+  const hasFullBody = hasUpperBody && allVisible([25, 26, 27, 28]);
+  const shoulderDepthDifference = Math.abs((landmarks[11]?.z ?? 1) - (landmarks[12]?.z ?? -1));
+
+  return {
+    hasHead,
+    hasShoulders,
+    hasUpperBody,
+    hasArms,
+    hasFullBody,
+    isFacingCamera: hasShoulders && shoulderDepthDifference <= 0.16,
+    confidence,
+  };
+}
 
 export function CameraScreen() {
   const { width: screenWidth, height: screenHeight } = useWindowDimensions();
   const { hasPermission, requestPermission } = useCameraPermission();
-  const [cameraFacing, setCameraFacing] = useState<'back' | 'front'>('back');
+  const [scanMode, setScanMode] = useState<ScanMode>('field');
+  const cameraFacing = scanMode === 'selfie' ? 'front' : 'back';
   const device = useCameraDevice(cameraFacing);
   const camera = useRef<Camera>(null);
   const [permissionChecked, setPermissionChecked] = useState(false);
-  const [status, setStatus] = useState<ScanStatus>('Searching target...');
+  const [scanStatus, setScanStatus] = useState<ScanStatus>('searchingFace');
+  const [qualityMessage, setQualityMessage] = useState('Find a clear face');
   const [faceBounds, setFaceBounds] = useState<FaceBounds | null>(null);
+  const [poseLandmarks, setPoseLandmarks] = useState<PoseLandmark[]>([]);
+  const [poseQuality, setPoseQuality] = useState<PoseQuality>(EMPTY_POSE_QUALITY);
+  const [mockProfile, setMockProfile] = useState<MockProfile | null>(null);
   const stableSince = useRef<number | null>(null);
-  const lastStatus = useRef<ScanStatus>('Searching target...');
+  const profileCache = useRef<{ profile: MockProfile; expiresAt: number } | null>(null);
   const scanProgress = useRef(new Animated.Value(0)).current;
   const lockPulse = useRef(new Animated.Value(0)).current;
   const threatProgress = useRef(new Animated.Value(0)).current;
@@ -63,31 +200,57 @@ export function CameraScreen() {
     setPermissionChecked(true);
   }, []);
 
-  const detectionOptions = useMemo<FaceDetectionOptions>(() => ({
-    performanceMode: 'fast',
-    landmarkMode: 'none',
-    contourMode: 'none',
-    classificationMode: 'none',
-    minFaceSize: 0.15,
-    trackingEnabled: true,
-    autoMode: true,
-    windowWidth: screenWidth,
-    windowHeight: screenHeight,
-    cameraFacing,
-  }), [cameraFacing, screenHeight, screenWidth]);
-  const { detectFaces, stopListeners } = useFaceDetector(detectionOptions);
-
-  useEffect(() => stopListeners, [stopListeners]);
-
   useEffect(() => {
     stableSince.current = null;
-    lastStatus.current = 'Searching target...';
-    setStatus('Searching target...');
+    setScanStatus('searchingFace');
+    setQualityMessage('Find a clear face');
     setFaceBounds(null);
-  }, [cameraFacing]);
+    setPoseLandmarks([]);
+    setPoseQuality(EMPTY_POSE_QUALITY);
+    setMockProfile(null);
+    profileCache.current = null;
+    threatProgress.stopAnimation();
+    threatProgress.setValue(0);
+  }, [scanMode]);
 
   const hasFace = faceBounds !== null;
-  const isLocked = status === 'Target locked';
+  const isLocked = !['idle', 'searchingFace', 'faceDetected'].includes(scanStatus);
+  const isComplete = scanStatus === 'completed' || (scanStatus === 'tracking' && mockProfile !== null);
+  const guidanceMessage = useMemo(() => {
+    if (scanStatus === 'idle' || scanStatus === 'searchingFace' || scanStatus === 'faceDetected') {
+      return qualityMessage;
+    }
+    if (scanStatus === 'faceLocked') {
+      return 'Face identity anchor secured';
+    }
+    if (scanStatus === 'tracking') {
+      return mockProfile ? 'Profile active · lock cached' : 'Body scan optional';
+    }
+    if (scanStatus === 'lostTracking') {
+      return 'Trying to reacquire target';
+    }
+    if (scanStatus === 'completed') {
+      return 'Mock profile ready';
+    }
+    return 'Mock processing...';
+  }, [mockProfile, qualityMessage, scanStatus]);
+  const posePoints = useMemo<ScreenPoint[]>(() => poseLandmarks.map((landmark) => ({
+    x: (cameraFacing === 'front' ? landmark.y : 1 - landmark.y) * screenWidth,
+    y: landmark.x * screenHeight,
+    visible: (landmark.visibility ?? 0) >= MIN_LANDMARK_VISIBILITY,
+  })), [cameraFacing, poseLandmarks, screenHeight, screenWidth]);
+  const poseDataLabel = poseQuality.hasFullBody
+    ? 'FULL BODY'
+    : poseQuality.hasUpperBody
+      ? 'UPPER BODY'
+      : poseQuality.hasShoulders
+        ? 'PARTIAL'
+        : hasFace
+          ? 'FACE ONLY'
+          : 'SEARCHING';
+  const acquisitionProgress = mockProfile && ['tracking', 'lostTracking'].includes(scanStatus)
+    ? STATUS_PROGRESS.completed
+    : STATUS_PROGRESS[scanStatus];
 
   useEffect(() => {
     if (!hasFace || isLocked) {
@@ -109,7 +272,7 @@ export function CameraScreen() {
   }, [hasFace, isLocked, scanProgress]);
 
   useEffect(() => {
-    if (status !== 'Locking...') {
+    if (scanStatus !== 'faceDetected') {
       lockPulse.stopAnimation();
       Animated.timing(lockPulse, {
         toValue: isLocked ? 1 : 0,
@@ -137,48 +300,125 @@ export function CameraScreen() {
     );
     animation.start();
     return () => animation.stop();
-  }, [isLocked, lockPulse, status]);
+  }, [isLocked, lockPulse, scanStatus]);
 
   useEffect(() => {
-    const progressByStatus: Record<ScanStatus, number> = {
-      'Searching target...': 0,
-      'Move closer': 0.25,
-      'Face forward': 0.5,
-      'Locking...': 0.78,
-      'Target locked': 1,
-    };
-
     Animated.timing(threatProgress, {
-      toValue: progressByStatus[status],
+      toValue: acquisitionProgress,
       duration: 260,
       easing: Easing.out(Easing.cubic),
       useNativeDriver: false,
     }).start();
-  }, [status, threatProgress]);
+  }, [acquisitionProgress, threatProgress]);
 
-  const updateStatus = useCallback((nextStatus: ScanStatus) => {
-    if (lastStatus.current !== nextStatus) {
-      lastStatus.current = nextStatus;
-      setStatus(nextStatus);
+  useEffect(() => {
+    let nextStatus: ScanStatus | null = null;
+    let delay = 700;
+
+    if (scanStatus === 'faceLocked') {
+      const cached = profileCache.current;
+      if (cached && cached.expiresAt > Date.now()) {
+        setMockProfile(cached.profile);
+      }
+      nextStatus = 'tracking';
+      delay = 300;
+    } else if (scanStatus === 'tracking' && !mockProfile) {
+      nextStatus = 'analyzing';
+      delay = scanMode === 'field' ? 900 : 350;
+    } else if (scanStatus === 'analyzing') {
+      nextStatus = 'completed';
+      delay = 1000;
+    } else if (scanStatus === 'completed') {
+      nextStatus = 'tracking';
+      delay = 650;
     }
-  }, []);
 
-  const handleFacesDetected = useCallback((faces: Face[]) => {
+    if (!nextStatus) {
+      return;
+    }
+
+    const timeout = setTimeout(() => {
+      if (nextStatus === 'completed') {
+        const profile = {
+          name: scanMode === 'selfie' ? 'SELF PROFILE' : 'UNKNOWN TARGET',
+          level: 12,
+          bounty: '4,280',
+        };
+        setMockProfile(profile);
+        profileCache.current = { profile, expiresAt: Number.POSITIVE_INFINITY };
+      }
+      setScanStatus(nextStatus);
+    }, delay);
+    return () => clearTimeout(timeout);
+  }, [mockProfile, scanMode, scanStatus]);
+
+  useEffect(() => {
+    if (scanStatus !== 'lostTracking') {
+      return;
+    }
+
+    const timeout = setTimeout(() => {
+      if (mockProfile) {
+        profileCache.current = {
+          profile: mockProfile,
+          expiresAt: Date.now() + LOCK_CACHE_MS,
+        };
+      }
+      stableSince.current = null;
+      setFaceBounds(null);
+      setPoseLandmarks([]);
+      setPoseQuality(EMPTY_POSE_QUALITY);
+      setMockProfile(null);
+      setQualityMessage('Find a clear face');
+      setScanStatus('searchingFace');
+    }, LOST_TRACKING_TIMEOUT_MS);
+
+    return () => clearTimeout(timeout);
+  }, [mockProfile, scanStatus]);
+
+  const handleFacesDetected = useCallback((faces: DetectedFace[]) => {
     const face = faces[0];
+
+    if (scanStatus === 'lostTracking') {
+      if (face) {
+        setFaceBounds(face.bounds);
+        setQualityMessage('Target reacquired');
+        setScanStatus('tracking');
+      }
+      return;
+    }
+
+    const trackingStatuses: ScanStatus[] = ['faceLocked', 'tracking', 'analyzing', 'completed'];
+    if (trackingStatuses.includes(scanStatus)) {
+      if (face) {
+        setFaceBounds(face.bounds);
+        return;
+      }
+
+      setQualityMessage('Signal lost');
+      setScanStatus('lostTracking');
+      return;
+    }
+
     if (!face) {
       stableSince.current = null;
       setFaceBounds(null);
-      updateStatus('Searching target...');
+      setScanStatus('searchingFace');
+      setQualityMessage('Find a clear face');
       return;
     }
 
     const bounds = face.bounds as FaceBounds;
     setFaceBounds(bounds);
+    setScanStatus('faceDetected');
 
-    const faceIsLargeEnough = bounds.width / screenWidth >= MIN_FACE_WIDTH_RATIO;
+    const minimumFaceWidth = scanMode === 'selfie'
+      ? MIN_SELFIE_FACE_WIDTH_RATIO
+      : MIN_FIELD_FACE_WIDTH_RATIO;
+    const faceIsLargeEnough = bounds.width / screenWidth >= minimumFaceWidth;
     if (!faceIsLargeEnough) {
       stableSince.current = null;
-      updateStatus('Move closer');
+      setQualityMessage('Move closer');
       return;
     }
 
@@ -194,31 +434,56 @@ export function CameraScreen() {
 
     if (!faceIsCentered || !faceIsForward) {
       stableSince.current = null;
-      updateStatus('Face forward');
+      setQualityMessage('Face forward');
       return;
     }
 
+    setQualityMessage('Hold still');
     const now = Date.now();
     stableSince.current ??= now;
     if (now - stableSince.current >= REQUIRED_STABLE_MS) {
-      updateStatus('Target locked');
+      setQualityMessage('Identity ready');
+      setScanStatus('faceLocked');
       return;
     }
+  }, [scanMode, scanStatus, screenHeight, screenWidth]);
 
-    updateStatus('Locking...');
-  }, [screenHeight, screenWidth, updateStatus]);
-
-  const reportFacesToJS = useMemo(
-    () => Worklets.createRunOnJS(handleFacesDetected),
-    [handleFacesDetected],
+  const handleScanResult = useCallback((result: NativeScanResult | null) => {
+    const faces = (result?.faces ?? []).map((face): DetectedFace => ({
+      bounds: {
+        x: face.x * screenWidth,
+        y: (1 - face.y - face.height) * screenHeight,
+        width: face.width * screenWidth,
+        height: face.height * screenHeight,
+      },
+      yawAngle: face.yawAngle,
+      rollAngle: face.rollAngle,
+    }));
+    handleFacesDetected(faces);
+    const landmarks = result?.landmarks ?? [];
+    const shouldCheckPose = scanMode === 'field'
+      && ['tracking', 'analyzing', 'completed'].includes(scanStatus);
+    if (shouldCheckPose) {
+      setPoseLandmarks(landmarks);
+      setPoseQuality(evaluatePose(landmarks));
+    }
+  }, [handleFacesDetected, scanMode, scanStatus, screenHeight, screenWidth]);
+  const reportScanToJS = useMemo(
+    () => Worklets.createRunOnJS(handleScanResult),
+    [handleScanResult],
   );
   const frameProcessor = useFrameProcessor((frame) => {
     'worklet';
     runAtTargetFps(8, () => {
       'worklet';
-      reportFacesToJS(detectFaces(frame));
+      if (!posePlugin) {
+        reportScanToJS(null);
+        return;
+      }
+      const result = posePlugin.call(frame, { cameraFacing }) as unknown as NativeScanResult | null;
+      reportScanToJS(result);
     });
-  }, [detectFaces, reportFacesToJS]);
+  }, [cameraFacing, reportScanToJS]);
 
   if (!permissionChecked) {
     return (
@@ -263,25 +528,29 @@ export function CameraScreen() {
         device={device}
         isActive
         frameProcessor={frameProcessor}
-        pixelFormat="yuv"
+        pixelFormat="rgb"
       />
 
       <SafeAreaView pointerEvents="box-none" style={styles.overlay}>
         <View style={styles.header}>
           <Text style={styles.brand}>BOUNTYFACE</Text>
           <View style={styles.headerActions}>
+            <View style={styles.modeControl}>
+              {(['selfie', 'field'] as ScanMode[]).map((mode) => (
+                <Pressable
+                  accessibilityRole="button"
+                  accessibilityState={{ selected: scanMode === mode }}
+                  key={mode}
+                  onPress={() => setScanMode(mode)}
+                  style={[styles.modeButton, scanMode === mode && styles.modeButtonActive]}
+                >
+                  <Text style={[styles.modeButtonText, scanMode === mode && styles.modeButtonTextActive]}>
+                    {mode.toUpperCase()}
+                  </Text>
+                </Pressable>
+              ))}
+            </View>
             <View style={[styles.liveDot, isLocked && styles.lockedDot]} />
-            <Pressable
-              accessibilityLabel={cameraFacing === 'back' ? '切換為自拍鏡頭' : '切換為後鏡頭'}
-              accessibilityRole="button"
-              hitSlop={8}
-              style={({ pressed }) => [styles.flipButton, pressed && styles.flipButtonPressed]}
-              onPress={() => setCameraFacing((current) => current === 'back' ? 'front' : 'back')}
-            >
-              <Text style={styles.flipButtonText}>
-                {cameraFacing === 'back' ? '自拍' : '後鏡頭'}
-              </Text>
-            </Pressable>
           </View>
         </View>
 
@@ -290,6 +559,7 @@ export function CameraScreen() {
             style={[
               styles.faceBox,
               isLocked && styles.faceBoxLocked,
+              scanStatus === 'lostTracking' && styles.faceBoxLost,
               {
                 left: faceBounds.x,
                 top: faceBounds.y,
@@ -328,34 +598,92 @@ export function CameraScreen() {
               />
             )}
             {isLocked && (
-              <View style={styles.lockBadge}>
-                <Text style={styles.lockBadgeText}>LOCK</Text>
+              <View style={[
+                styles.lockBadge,
+                scanStatus === 'lostTracking' && styles.lockBadgeLost,
+              ]}>
+                <Text style={styles.lockBadgeText}>
+                  {scanStatus === 'lostTracking' ? 'LOST' : 'LOCK'}
+                </Text>
               </View>
             )}
           </Animated.View>
         )}
 
+        {scanMode === 'field' && posePoints.length >= 33 && (
+          <View pointerEvents="none" style={styles.poseOverlay}>
+            {POSE_CONNECTIONS.map(([startIndex, endIndex]) => {
+              const start = posePoints[startIndex];
+              const end = posePoints[endIndex];
+              if (!start?.visible || !end?.visible) {
+                return null;
+              }
+
+              const distance = Math.hypot(end.x - start.x, end.y - start.y);
+              const angle = Math.atan2(end.y - start.y, end.x - start.x);
+              return (
+                <View
+                  key={`${startIndex}-${endIndex}`}
+                  style={[
+                    styles.poseBone,
+                    {
+                      left: (start.x + end.x - distance) / 2,
+                      top: (start.y + end.y) / 2 - 1,
+                      width: distance,
+                      transform: [{ rotate: `${angle}rad` }],
+                    },
+                  ]}
+                />
+              );
+            })}
+            {DISPLAYED_LANDMARKS.map((index) => {
+              const point = posePoints[index];
+              if (!point?.visible) {
+                return null;
+              }
+
+              return (
+                <View
+                  key={index}
+                  style={[styles.poseJoint, { left: point.x - 4, top: point.y - 4 }]}
+                />
+              );
+            })}
+          </View>
+        )}
+
         <View style={styles.statusPanel}>
           <View style={styles.statusHeading}>
             <View>
-              <Text style={styles.statusLabel}>FACE ACQUISITION</Text>
-              <Text style={[styles.status, isLocked && styles.statusLocked]}>{status}</Text>
+              <Text style={styles.statusLabel}>{scanMode.toUpperCase()} MODE</Text>
+              <Text style={[
+                styles.status,
+                isLocked && styles.statusLocked,
+                scanStatus === 'lostTracking' && styles.statusLost,
+              ]}>
+                {STATUS_COPY[scanStatus]}
+              </Text>
+              <Text style={styles.qualityMessage}>{guidanceMessage}</Text>
             </View>
-            <Text style={[styles.readyState, isLocked && styles.readyStateLocked]}>
-              {isLocked ? 'READY' : 'SCANNING'}
+            <Text style={[
+              styles.readyState,
+              isComplete && styles.readyStateLocked,
+              scanStatus === 'lostTracking' && styles.readyStateLost,
+            ]}>
+              {scanStatus === 'lostTracking' ? 'LOST' : isComplete ? 'TRACKING' : 'SCANNING'}
             </Text>
           </View>
 
           <View style={styles.threatPanel}>
             <View style={styles.threatHeader}>
-              <Text style={styles.threatLabel}>THREAT SIGNAL</Text>
-              <Text style={styles.threatValue}>{isLocked ? '100%' : 'CALIBRATING'}</Text>
+              <Text style={styles.threatLabel}>SCAN PROGRESS</Text>
+              <Text style={styles.threatValue}>{Math.round(acquisitionProgress * 100)}%</Text>
             </View>
             <View style={styles.threatTrack}>
               <Animated.View
                 style={[
                   styles.threatFill,
-                  isLocked && styles.threatFillLocked,
+                  (isLocked || poseQuality.hasFullBody) && styles.threatFillLocked,
                   {
                     width: threatProgress.interpolate({
                       inputRange: [0, 1],
@@ -367,9 +695,41 @@ export function CameraScreen() {
             </View>
             <View style={styles.metricsRow}>
               <Text style={styles.metric}>FACE {hasFace ? 'ON' : '--'}</Text>
-              <Text style={styles.metric}>ALIGN {status === 'Face forward' ? 'ADJUST' : hasFace ? 'OK' : '--'}</Text>
+              <Text style={styles.metric}>MODE {scanMode.toUpperCase()}</Text>
               <Text style={styles.metric}>LOCK {isLocked ? 'YES' : 'NO'}</Text>
             </View>
+            {scanMode === 'field' && (
+              <>
+                <View style={styles.subjectRow}>
+                  <View>
+                    <Text style={styles.subjectLabel}>POSE DATA · OPTIONAL</Text>
+                    <Text style={styles.subjectValue}>{poseDataLabel}</Text>
+                  </View>
+                  <Text style={styles.poseConfidence}>
+                    POSE {Math.round(poseQuality.confidence * 100)}%
+                  </Text>
+                </View>
+                <View style={styles.poseFlags}>
+                  <Text style={[styles.poseFlag, poseQuality.hasHead && styles.poseFlagActive]}>HEAD</Text>
+                  <Text style={[styles.poseFlag, poseQuality.hasShoulders && styles.poseFlagActive]}>SHOULDERS</Text>
+                  <Text style={[styles.poseFlag, poseQuality.hasUpperBody && styles.poseFlagActive]}>TORSO</Text>
+                  <Text style={[styles.poseFlag, poseQuality.hasArms && styles.poseFlagActive]}>ARMS</Text>
+                  <Text style={[styles.poseFlag, poseQuality.isFacingCamera && styles.poseFlagActive]}>FRONT</Text>
+                </View>
+              </>
+            )}
+            {mockProfile && (
+              <View style={styles.profilePanel}>
+                <View>
+                  <Text style={styles.profileLabel}>MOCK PROFILE</Text>
+                  <Text style={styles.profileName}>{mockProfile.name}</Text>
+                </View>
+                <View style={styles.profileStats}>
+                  <Text style={styles.profileStat}>LEVEL {mockProfile.level}</Text>
+                  <Text style={styles.profileStat}>BOUNTY {mockProfile.bounty}</Text>
+                </View>
+              </View>
+            )}
           </View>
         </View>
       </SafeAreaView>
@@ -417,21 +777,27 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(5, 8, 7, 0.68)',
   },
   brand: { color: '#ffffff', fontSize: 16, fontWeight: '800' },
-  headerActions: { flexDirection: 'row', alignItems: 'center', gap: 14 },
+  headerActions: { flexDirection: 'row', alignItems: 'center', gap: 10 },
   liveDot: { width: 9, height: 9, borderRadius: 5, backgroundColor: '#f0c85a' },
   lockedDot: { backgroundColor: '#7ef9c6' },
-  flipButton: {
-    minWidth: 62,
-    height: 36,
-    alignItems: 'center',
-    justifyContent: 'center',
+  modeControl: {
+    height: 32,
+    flexDirection: 'row',
     borderWidth: 1,
-    borderColor: 'rgba(126, 249, 198, 0.7)',
-    borderRadius: 6,
+    borderColor: 'rgba(126, 249, 198, 0.54)',
+    borderRadius: 4,
+    overflow: 'hidden',
     backgroundColor: 'rgba(5, 8, 7, 0.76)',
   },
-  flipButtonPressed: { backgroundColor: 'rgba(126, 249, 198, 0.24)' },
-  flipButtonText: { color: '#ffffff', fontSize: 14, fontWeight: '700' },
+  modeButton: {
+    minWidth: 48,
+    paddingHorizontal: 7,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  modeButtonActive: { backgroundColor: '#7ef9c6' },
+  modeButtonText: { color: '#94a59e', fontSize: 9, fontWeight: '800' },
+  modeButtonTextActive: { color: '#07110d' },
   faceBox: {
     position: 'absolute',
     borderWidth: 1,
@@ -439,6 +805,25 @@ const styles = StyleSheet.create({
     backgroundColor: 'transparent',
   },
   faceBoxLocked: { borderColor: 'rgba(126, 249, 198, 0.72)', borderWidth: 1 },
+  faceBoxLost: { borderColor: 'rgba(240, 200, 90, 0.78)' },
+  poseOverlay: { ...StyleSheet.absoluteFillObject },
+  poseBone: {
+    position: 'absolute',
+    height: 2,
+    backgroundColor: 'rgba(126, 249, 198, 0.78)',
+    shadowColor: '#7ef9c6',
+    shadowOpacity: 0.55,
+    shadowRadius: 3,
+  },
+  poseJoint: {
+    position: 'absolute',
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    borderWidth: 2,
+    borderColor: '#07110d',
+    backgroundColor: '#7ef9c6',
+  },
   corner: { position: 'absolute', width: 24, height: 24, borderColor: '#f0c85a' },
   cornerTopLeft: { top: -2, left: -2, borderTopWidth: 4, borderLeftWidth: 4 },
   cornerTopRight: { top: -2, right: -2, borderTopWidth: 4, borderRightWidth: 4 },
@@ -463,6 +848,7 @@ const styles = StyleSheet.create({
     paddingVertical: 4,
     backgroundColor: '#7ef9c6',
   },
+  lockBadgeLost: { backgroundColor: '#f0c85a' },
   lockBadgeText: { color: '#07110d', fontSize: 10, fontWeight: '900' },
   statusPanel: {
     margin: 20,
@@ -475,10 +861,13 @@ const styles = StyleSheet.create({
   },
   statusHeading: { flexDirection: 'row', alignItems: 'flex-start', justifyContent: 'space-between' },
   statusLabel: { color: '#94a59e', fontSize: 11, fontWeight: '700' },
-  status: { marginTop: 5, color: '#ffffff', fontSize: 24, fontWeight: '700' },
+  status: { marginTop: 5, color: '#ffffff', fontSize: 21, fontWeight: '700' },
   statusLocked: { color: '#7ef9c6' },
+  statusLost: { color: '#f0c85a' },
+  qualityMessage: { marginTop: 4, color: '#aebbb6', fontSize: 11, fontWeight: '600' },
   readyState: { color: '#f0c85a', fontSize: 11, fontWeight: '800' },
   readyStateLocked: { color: '#7ef9c6' },
+  readyStateLost: { color: '#f0c85a' },
   threatPanel: { marginTop: 16, borderTopWidth: 1, borderTopColor: 'rgba(148, 165, 158, 0.3)', paddingTop: 12 },
   threatHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
   threatLabel: { color: '#94a59e', fontSize: 10, fontWeight: '700' },
@@ -488,4 +877,32 @@ const styles = StyleSheet.create({
   threatFillLocked: { backgroundColor: '#7ef9c6' },
   metricsRow: { flexDirection: 'row', justifyContent: 'space-between', marginTop: 10 },
   metric: { color: '#94a59e', fontSize: 9, fontWeight: '700' },
+  subjectRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-end',
+    justifyContent: 'space-between',
+    marginTop: 12,
+    paddingTop: 10,
+    borderTopWidth: 1,
+    borderTopColor: 'rgba(148, 165, 158, 0.22)',
+  },
+  subjectLabel: { color: '#94a59e', fontSize: 9, fontWeight: '700' },
+  subjectValue: { marginTop: 3, color: '#ffffff', fontSize: 15, fontWeight: '800' },
+  poseConfidence: { color: '#7ef9c6', fontSize: 10, fontWeight: '800' },
+  poseFlags: { flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginTop: 9 },
+  poseFlag: { color: '#66736e', fontSize: 8, fontWeight: '800' },
+  poseFlagActive: { color: '#7ef9c6' },
+  profilePanel: {
+    marginTop: 12,
+    paddingTop: 10,
+    flexDirection: 'row',
+    alignItems: 'flex-end',
+    justifyContent: 'space-between',
+    borderTopWidth: 1,
+    borderTopColor: 'rgba(126, 249, 198, 0.35)',
+  },
+  profileLabel: { color: '#7ef9c6', fontSize: 9, fontWeight: '800' },
+  profileName: { marginTop: 3, color: '#ffffff', fontSize: 15, fontWeight: '800' },
+  profileStats: { alignItems: 'flex-end', gap: 3 },
+  profileStat: { color: '#d8e2de', fontSize: 9, fontWeight: '700' },
 });

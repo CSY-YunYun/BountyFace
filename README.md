@@ -45,33 +45,6 @@ For existing targets, only the face embedding is transmitted to the backend for 
 
 ### 4. API Design
 
-#### Existing Target Flow
-
-```text
-Camera
-→ Face detected
-→ Generate face embedding locally
-→ POST /v1/scan
-→ Match found
-→ GET /v1/targets/{targetId}
-```
-
-#### New Target Flow
-
-```text
-Camera
-→ Face detected
-→ Generate face embedding locally
-→ POST /v1/scan
-→ No match found
-→ Capture one scan image
-→ POST /v1/targets/generate
-→ Analyze image temporarily
-→ Save face embedding + generated profile only
-```
-
----
-
 ### Send face embedding to server
 
 `POST /v1/scan`
@@ -83,25 +56,25 @@ Request body:
   "faceEmbedding": [0.0123, -0.4567, 0.8912]
 }
 ```
-
-If the same face embedding exists in the database:
+If a matching or similar face exists in the database:
 
 ```json
 {
   "status": "SUCCESS",
   "matchFound": true,
   "targetId": "uuid-v4-cool-string",
+  "confidence": 0.92,
   "message": "Target identified successfully."
 }
 ```
 
-If the face embedding does not exist in the database:
+If no matching face exists in the database:
 
 ```json
 {
   "status": "SUCCESS",
   "matchFound": false,
-  "targetId": "uuid-v4-new-generated-string",
+  "temporaryScanId": "temp-uuid-v4-string",
   "message": "New face detected. Please generate a profile."
 }
 ```
@@ -119,13 +92,15 @@ Response:
   "status": "SUCCESS",
   "profile": {
     "id": "uuid-v4-cool-string",
-    "codename": "黑曜石",
+    "codename": "Obsidian",
+    "battle_power": 9842,
     "threat_level": "S",
-    "power_level": 9000,
-    "net_worth": 50000000,
-    "hacking": 85,
-    "stealth": 90,
-    "description": "該目標常出沒於霓虹街區底層，擅長使用未知協定黑入企業級防火牆。",
+    "level": 87,
+    "str": 82,
+    "dex": 91,
+    "int": 35,
+    "luk": 99,
+    "description": "A highly agile target specializing in rapid movement and surprise attacks, frequently appearing in urban night zones.",
     "is_public_figure": false
   }
 }
@@ -146,7 +121,7 @@ multipart/form-data
 Fields:
 
 ```text
-targetId: string
+temporaryScanId: string
 faceEmbedding: number[]
 scanImage: file
 ```
@@ -160,13 +135,15 @@ Response:
   "targetId": "uuid-v4-new-generated-string",
   "profile": {
     "id": "uuid-v4-new-generated-string",
-    "codename": "黑曜石",
+    "codename": "Obsidian",
+    "battle_power": 9842,
     "threat_level": "S",
-    "power_level": 9000,
-    "net_worth": 50000000,
-    "hacking": 85,
-    "stealth": 90,
-    "description": "該目標常出沒於霓虹街區底層，擅長使用未知協定黑入企業級防火牆。",
+    "level": 87,
+    "str": 82,
+    "dex": 91,
+    "int": 35,
+    "luk": 99,
+    "description": "A highly agile target specializing in rapid movement and surprise attacks, frequently appearing in urban night zones.",
     "is_public_figure": false
   }
 }
@@ -174,25 +151,24 @@ Response:
 
 ---
 
-### Save or update target profile
+### Update target profile
 
-`POST /v1/targets/save`
+`PATCH /v1/targets/{targetId}`
 
 Request body:
 
 ```json
 {
-  "targetId": "uuid-v4-cool-string",
   "profile": {
-    "id": "uuid-v4-cool-string",
-    "codename": "黑曜石",
+    "codename": "Obsidian",
+    "battle_power": 9842,
     "threat_level": "S",
-    "power_level": 9000,
-    "net_worth": 50000000,
-    "hacking": 85,
-    "stealth": 90,
-    "description": "該目標常出沒於霓虹街區底層，擅長使用未知協定黑入企業級防火牆。",
-    "face_embedding": [0.0123, -0.4567, 0.8912],
+    "level": 87,
+    "str": 82,
+    "dex": 91,
+    "int": 35,
+    "luk": 99,
+    "description": "A highly agile target specializing in rapid movement and surprise attacks, frequently appearing in urban night zones.",
     "is_public_figure": false
   }
 }
@@ -203,10 +179,11 @@ Response:
 ```json
 {
   "status": "SUCCESS",
-  "message": "Target profile saved successfully.",
+  "message": "Target profile updated successfully.",
   "targetId": "uuid-v4-cool-string"
 }
 ```
+
 
 ---
 
@@ -237,34 +214,7 @@ Response:
 * **輕量化單實例架構 (Lightweight Single-Instance Architecture)：**
   為了保持架構精實與成本效益，本專案刻意不採用繁重的分布式向量資料庫（如 Milvus、Qdrant）。取而代之的是，使用配備 HNSW 索引的單實例 PostgreSQL（透過 Supabase `pgvector`），這對於目前的遊戲資料量來說，已經能提供極其流暢且低於毫秒級的檢索效能。
 
-### 4. API Design
-
-#### 已存在目標流程
-
-```text
-Camera
-→ 偵測到臉
-→ 本地端產生 face embedding
-→ POST /v1/scan
-→ 找到相符目標
-→ GET /v1/targets/{targetId}
-```
-
-#### 新目標流程
-
-```text
-Camera
-→ 偵測到臉
-→ 本地端產生 face embedding
-→ POST /v1/scan
-→ 沒有找到相符目標
-→ 擷取一張掃描照片
-→ POST /v1/targets/generate
-→ 暫時分析影像
-→ 只保存 face embedding + 產生後的 profile
-```
-
----
+## 4. API Design
 
 ### 傳送臉部特徵向量至伺服器
 
@@ -285,6 +235,7 @@ Request body:
   "status": "SUCCESS",
   "matchFound": true,
   "targetId": "uuid-v4-cool-string",
+  "confidence": 0.92,
   "message": "Target identified successfully."
 }
 ```
@@ -295,7 +246,7 @@ Request body:
 {
   "status": "SUCCESS",
   "matchFound": false,
-  "targetId": "uuid-v4-new-generated-string",
+  "temporaryScanId": "temp-uuid-v4-string",
   "message": "New face detected. Please generate a profile."
 }
 ```
@@ -314,12 +265,14 @@ Response:
   "profile": {
     "id": "uuid-v4-cool-string",
     "codename": "黑曜石",
+    "battle_power": 9842,
     "threat_level": "S",
-    "power_level": 9000,
-    "net_worth": 50000000,
-    "hacking": 85,
-    "stealth": 90,
-    "description": "該目標常出沒於霓虹街區底層，擅長使用未知協定黑入企業級防火牆。",
+    "level": 87,
+    "str": 82,
+    "dex": 91,
+    "int": 35,
+    "luk": 99,
+    "description": "敏捷型角色，擅長高速移動與突襲，經常出沒於城市夜間區域。",
     "is_public_figure": false
   }
 }
@@ -340,7 +293,7 @@ multipart/form-data
 Fields:
 
 ```text
-targetId: string
+temporaryScanId: string
 faceEmbedding: number[]
 scanImage: file
 ```
@@ -355,12 +308,14 @@ Response:
   "profile": {
     "id": "uuid-v4-new-generated-string",
     "codename": "黑曜石",
+    "battle_power": 9842,
     "threat_level": "S",
-    "power_level": 9000,
-    "net_worth": 50000000,
-    "hacking": 85,
-    "stealth": 90,
-    "description": "該目標常出沒於霓虹街區底層，擅長使用未知協定黑入企業級防火牆。",
+    "level": 87,
+    "str": 82,
+    "dex": 91,
+    "int": 35,
+    "luk": 99,
+    "description": "敏捷型角色，擅長高速移動與突襲，經常出沒於城市夜間區域。",
     "is_public_figure": false
   }
 }
@@ -368,25 +323,24 @@ Response:
 
 ---
 
-### 儲存或更新目標資料
+### 更新目標資料
 
-`POST /v1/targets/save`
+`PATCH /v1/targets/{targetId}`
 
 Request body:
 
 ```json
 {
-  "targetId": "uuid-v4-cool-string",
   "profile": {
-    "id": "uuid-v4-cool-string",
     "codename": "黑曜石",
+    "battle_power": 9842,
     "threat_level": "S",
-    "power_level": 9000,
-    "net_worth": 50000000,
-    "hacking": 85,
-    "stealth": 90,
-    "description": "該目標常出沒於霓虹街區底層，擅長使用未知協定黑入企業級防火牆。",
-    "face_embedding": [0.0123, -0.4567, 0.8912],
+    "level": 87,
+    "str": 82,
+    "dex": 91,
+    "int": 35,
+    "luk": 99,
+    "description": "敏捷型角色，擅長高速移動與突襲，經常出沒於城市夜間區域。",
     "is_public_figure": false
   }
 }
@@ -397,7 +351,7 @@ Response:
 ```json
 {
   "status": "SUCCESS",
-  "message": "Target profile saved successfully.",
+  "message": "Target profile updated successfully.",
   "targetId": "uuid-v4-cool-string"
 }
 ```
