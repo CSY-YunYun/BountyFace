@@ -33,9 +33,15 @@ type ScanStatus =
   | 'completed';
 
 type MockProfile = {
-  name: string;
+  codename: string;
+  battlePower: number;
+  threatLevel: string;
   level: number;
-  bounty: string;
+  str: number;
+  dex: number;
+  int: number;
+  luk: number;
+  description: string;
 };
 
 type FaceBounds = {
@@ -134,6 +140,17 @@ const STATUS_COPY: Record<ScanStatus, string> = {
 
 const LOST_TRACKING_TIMEOUT_MS = 1000;
 const LOCK_CACHE_MS = 5000;
+const MOCK_PROFILE: MockProfile = {
+  codename: '黑曜石',
+  battlePower: 9842,
+  threatLevel: 'S',
+  level: 87,
+  str: 82,
+  dex: 91,
+  int: 35,
+  luk: 99,
+  description: '敏捷型角色，擅長高速移動與突襲，經常出沒於城市夜間區域。',
+};
 
 const EMPTY_POSE_QUALITY: PoseQuality = {
   hasHead: false,
@@ -339,11 +356,7 @@ export function CameraScreen() {
 
     const timeout = setTimeout(() => {
       if (nextStatus === 'completed') {
-        const profile = {
-          name: scanMode === 'selfie' ? 'SELF PROFILE' : 'UNKNOWN TARGET',
-          level: 12,
-          bounty: '4,280',
-        };
+        const profile = MOCK_PROFILE;
         setMockProfile(profile);
         profileCache.current = { profile, expiresAt: Number.POSITIVE_INFINITY };
       }
@@ -661,7 +674,9 @@ export function CameraScreen() {
                 isLocked && styles.statusLocked,
                 scanStatus === 'lostTracking' && styles.statusLost,
               ]}>
-                {STATUS_COPY[scanStatus]}
+                {mockProfile && scanStatus === 'tracking'
+                  ? 'Target identified'
+                  : STATUS_COPY[scanStatus]}
               </Text>
               <Text style={styles.qualityMessage}>{guidanceMessage}</Text>
             </View>
@@ -670,7 +685,7 @@ export function CameraScreen() {
               isComplete && styles.readyStateLocked,
               scanStatus === 'lostTracking' && styles.readyStateLost,
             ]}>
-              {scanStatus === 'lostTracking' ? 'LOST' : isComplete ? 'TRACKING' : 'SCANNING'}
+              {scanStatus === 'lostTracking' ? 'LOST' : isComplete ? 'IDENTIFIED' : 'SCANNING'}
             </Text>
           </View>
 
@@ -698,7 +713,7 @@ export function CameraScreen() {
               <Text style={styles.metric}>MODE {scanMode.toUpperCase()}</Text>
               <Text style={styles.metric}>LOCK {isLocked ? 'YES' : 'NO'}</Text>
             </View>
-            {scanMode === 'field' && (
+            {scanMode === 'field' && !mockProfile && (
               <>
                 <View style={styles.subjectRow}>
                   <View>
@@ -720,13 +735,48 @@ export function CameraScreen() {
             )}
             {mockProfile && (
               <View style={styles.profilePanel}>
-                <View>
-                  <Text style={styles.profileLabel}>MOCK PROFILE</Text>
-                  <Text style={styles.profileName}>{mockProfile.name}</Text>
+                <View style={styles.profileHeader}>
+                  <View>
+                    <Text style={styles.profileLabel}>CODENAME / 代號</Text>
+                    <Text style={styles.profileName}>{mockProfile.codename}</Text>
+                  </View>
+                  <View style={styles.threatBadge}>
+                    <Text style={styles.threatBadgeLabel}>THREAT</Text>
+                    <Text style={styles.threatBadgeValue}>{mockProfile.threatLevel}</Text>
+                  </View>
                 </View>
-                <View style={styles.profileStats}>
-                  <Text style={styles.profileStat}>LEVEL {mockProfile.level}</Text>
-                  <Text style={styles.profileStat}>BOUNTY {mockProfile.bounty}</Text>
+
+                <View style={styles.powerRow}>
+                  <View>
+                    <Text style={styles.powerLabel}>BATTLE POWER / 戰力</Text>
+                    <Text style={styles.powerValue}>
+                      {mockProfile.battlePower.toLocaleString('en-US')}
+                    </Text>
+                  </View>
+                  <View style={styles.levelBlock}>
+                    <Text style={styles.levelLabel}>LEVEL</Text>
+                    <Text style={styles.levelValue}>LV. {mockProfile.level}</Text>
+                  </View>
+                </View>
+
+                <View style={styles.abilityGrid}>
+                  {([
+                    ['STR', '力量', mockProfile.str],
+                    ['DEX', '敏捷', mockProfile.dex],
+                    ['INT', '智力', mockProfile.int],
+                    ['LUK', '幸運', mockProfile.luk],
+                  ] as const).map(([code, label, value]) => (
+                    <View key={code} style={styles.abilityItem}>
+                      <Text style={styles.abilityCode}>{code}</Text>
+                      <Text style={styles.abilityValue}>{value}</Text>
+                      <Text style={styles.abilityLabel}>{label}</Text>
+                    </View>
+                  ))}
+                </View>
+
+                <View style={styles.descriptionBlock}>
+                  <Text style={styles.descriptionLabel}>DESCRIPTION / 描述</Text>
+                  <Text style={styles.descriptionText}>{mockProfile.description}</Text>
                 </View>
               </View>
             )}
@@ -894,15 +944,69 @@ const styles = StyleSheet.create({
   poseFlagActive: { color: '#7ef9c6' },
   profilePanel: {
     marginTop: 12,
-    paddingTop: 10,
+    paddingTop: 12,
+    borderTopWidth: 1,
+    borderTopColor: 'rgba(126, 249, 198, 0.45)',
+  },
+  profileHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  profileLabel: { color: '#7ef9c6', fontSize: 9, fontWeight: '800' },
+  profileName: { marginTop: 3, color: '#ffffff', fontSize: 24, fontWeight: '900' },
+  threatBadge: {
+    minWidth: 58,
+    height: 48,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1,
+    borderColor: '#f0c85a',
+    backgroundColor: 'rgba(240, 200, 90, 0.12)',
+  },
+  threatBadgeLabel: { color: '#f0c85a', fontSize: 8, fontWeight: '800' },
+  threatBadgeValue: { marginTop: 1, color: '#ffffff', fontSize: 24, fontWeight: '900' },
+  powerRow: {
+    marginTop: 12,
+    paddingVertical: 9,
     flexDirection: 'row',
     alignItems: 'flex-end',
     justifyContent: 'space-between',
     borderTopWidth: 1,
-    borderTopColor: 'rgba(126, 249, 198, 0.35)',
+    borderBottomWidth: 1,
+    borderColor: 'rgba(148, 165, 158, 0.25)',
   },
-  profileLabel: { color: '#7ef9c6', fontSize: 9, fontWeight: '800' },
-  profileName: { marginTop: 3, color: '#ffffff', fontSize: 15, fontWeight: '800' },
-  profileStats: { alignItems: 'flex-end', gap: 3 },
-  profileStat: { color: '#d8e2de', fontSize: 9, fontWeight: '700' },
+  powerLabel: { color: '#94a59e', fontSize: 8, fontWeight: '800' },
+  powerValue: {
+    marginTop: 1,
+    color: '#7ef9c6',
+    fontSize: 40,
+    fontWeight: '900',
+    fontVariant: ['tabular-nums'],
+  },
+  levelBlock: { alignItems: 'flex-end', paddingBottom: 4 },
+  levelLabel: { color: '#94a59e', fontSize: 8, fontWeight: '800' },
+  levelValue: { marginTop: 3, color: '#ffffff', fontSize: 16, fontWeight: '900' },
+  abilityGrid: { flexDirection: 'row', gap: 5, marginTop: 10 },
+  abilityItem: {
+    flex: 1,
+    minWidth: 0,
+    height: 58,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderLeftWidth: 2,
+    borderLeftColor: '#7ef9c6',
+    backgroundColor: 'rgba(126, 249, 198, 0.08)',
+  },
+  abilityCode: { color: '#94a59e', fontSize: 8, fontWeight: '800' },
+  abilityValue: { marginTop: 1, color: '#ffffff', fontSize: 19, fontWeight: '900' },
+  abilityLabel: { color: '#7ef9c6', fontSize: 8, fontWeight: '700' },
+  descriptionBlock: { marginTop: 10 },
+  descriptionLabel: { color: '#94a59e', fontSize: 8, fontWeight: '800' },
+  descriptionText: {
+    marginTop: 4,
+    color: '#d8e2de',
+    fontSize: 11,
+    lineHeight: 17,
+  },
 });
