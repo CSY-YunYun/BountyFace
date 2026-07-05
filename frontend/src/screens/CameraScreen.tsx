@@ -3,10 +3,12 @@ import {
   ActivityIndicator,
   Animated,
   Easing,
+  Modal,
   Pressable,
   SafeAreaView,
   StyleSheet,
   Text,
+  TextInput,
   useWindowDimensions,
   View,
 } from 'react-native';
@@ -19,8 +21,19 @@ import {
   VisionCameraProxy,
 } from 'react-native-vision-camera';
 import { Worklets } from 'react-native-worklets-core';
+import {
+  analyzeTargetScan,
+  ApiScanResult,
+  ApiTargetProfile,
+  confirmTargetMatch,
+  generateTarget,
+  getTarget,
+  scanFace,
+  updateTargetDisplayName,
+} from '../services/api';
 
 type ScanMode = 'selfie' | 'field';
+type ProfileSource = 'ai' | 'mock' | 'matched';
 
 type ScanStatus =
   | 'idle'
@@ -30,11 +43,22 @@ type ScanStatus =
   | 'tracking'
   | 'lostTracking'
   | 'analyzing'
+  | 'possibleMatch'
   | 'completed';
 
+type PossibleMatchCandidate = {
+  targetId: string;
+  temporaryScanId: string;
+  profile: ApiTargetProfile;
+  confidence: number;
+  photoPath: string;
+};
+
 type MockProfile = {
+  id: string;
+  displayName: string;
   codename: string;
-  battlePower: number;
+  basePower: number;
   threatLevel: string;
   level: number;
   str: number;
@@ -42,6 +66,8 @@ type MockProfile = {
   int: number;
   luk: number;
   description: string;
+  isPublicFigure: boolean;
+  isNameEditable: boolean;
 };
 
 type FaceBounds = {
@@ -82,6 +108,11 @@ type DetectedFace = {
 type NativeScanResult = {
   faces?: NativeFace[];
   landmarks?: PoseLandmark[];
+  embedding?: number[];
+  faceQuality?: {
+    brightness: number;
+    sharpness: number;
+  };
 };
 
 type PoseQuality = {
@@ -97,11 +128,17 @@ type PoseQuality = {
 const posePlugin = VisionCameraProxy.initFrameProcessorPlugin('poseLandmarker', {});
 
 const REQUIRED_STABLE_MS = 1000;
-const MAX_ANGLE = 14;
+const FACE_DETECTION_GRACE_MS = 400;
+const MAX_YAW_ANGLE = 30;
+const MAX_ROLL_ANGLE = 22;
 const MIN_SELFIE_FACE_WIDTH_RATIO = 0.3;
 const MIN_FIELD_FACE_WIDTH_RATIO = 0.1;
-const MAX_CENTER_OFFSET_RATIO = 0.16;
+const MAX_CENTER_OFFSET_X_RATIO = 0.24;
+const MAX_CENTER_OFFSET_Y_RATIO = 0.28;
 const MIN_LANDMARK_VISIBILITY = 0.45;
+const MIN_FACE_BRIGHTNESS = 0.15;
+const MAX_FACE_BRIGHTNESS = 0.92;
+const MIN_FACE_SHARPNESS = 0.018;
 const POSE_CONNECTIONS: Array<[number, number]> = [
   [11, 12],
   [11, 13],
@@ -125,6 +162,7 @@ const STATUS_PROGRESS: Record<ScanStatus, number> = {
   tracking: 0.8,
   lostTracking: 0.8,
   analyzing: 0.9,
+  possibleMatch: 0.9,
   completed: 1,
 };
 const STATUS_COPY: Record<ScanStatus, string> = {
@@ -135,23 +173,11 @@ const STATUS_COPY: Record<ScanStatus, string> = {
   tracking: 'Target tracking',
   lostTracking: 'Signal lost...',
   analyzing: 'Analyzing target...',
+  possibleMatch: 'Possible identity match',
   completed: 'Scan completed',
 };
 
 const LOST_TRACKING_TIMEOUT_MS = 1000;
-const LOCK_CACHE_MS = 5000;
-const MOCK_PROFILE: MockProfile = {
-  codename: '黑曜石',
-  battlePower: 9842,
-  threatLevel: 'S',
-  level: 87,
-  str: 82,
-  dex: 91,
-  int: 35,
-  luk: 99,
-  description: '敏捷型角色，擅長高速移動與突襲，經常出沒於城市夜間區域。',
-};
-
 const EMPTY_POSE_QUALITY: PoseQuality = {
   hasHead: false,
   hasShoulders: false,
@@ -192,6 +218,24 @@ function evaluatePose(landmarks: PoseLandmark[] | null): PoseQuality {
   };
 }
 
+function toUiProfile(profile: ApiTargetProfile): MockProfile {
+  return {
+    id: profile.id,
+    displayName: profile.display_name,
+    codename: profile.codename,
+    basePower: profile.base_power,
+    threatLevel: profile.threat_level,
+    level: profile.level,
+    str: profile.str,
+    dex: profile.dex,
+    int: profile.int,
+    luk: profile.luk,
+    description: profile.description,
+    isPublicFigure: profile.is_public_figure,
+    isNameEditable: profile.is_name_editable,
+  };
+}
+
 export function CameraScreen() {
   const { width: screenWidth, height: screenHeight } = useWindowDimensions();
   const { hasPermission, requestPermission } = useCameraPermission();
@@ -205,9 +249,18 @@ export function CameraScreen() {
   const [faceBounds, setFaceBounds] = useState<FaceBounds | null>(null);
   const [poseLandmarks, setPoseLandmarks] = useState<PoseLandmark[]>([]);
   const [poseQuality, setPoseQuality] = useState<PoseQuality>(EMPTY_POSE_QUALITY);
+  const [faceEmbedding, setFaceEmbedding] = useState<number[] | null>(null);
   const [mockProfile, setMockProfile] = useState<MockProfile | null>(null);
+  const [profileSource, setProfileSource] = useState<ProfileSource | null>(null);
+  const [scanResult, setScanResult] = useState<ApiScanResult | null>(null);
+  const [scanSource, setScanSource] = useState<'ai' | 'mock' | null>(null);
+  const [possibleMatch, setPossibleMatch] = useState<PossibleMatchCandidate | null>(null);
+  const [isEditingName, setIsEditingName] = useState(false);
+  const [displayNameDraft, setDisplayNameDraft] = useState('');
+  const [isSavingName, setIsSavingName] = useState(false);
   const stableSince = useRef<number | null>(null);
-  const profileCache = useRef<{ profile: MockProfile; expiresAt: number } | null>(null);
+  const lastValidFaceAt = useRef<number | null>(null);
+  const analysisAttempted = useRef(false);
   const scanProgress = useRef(new Animated.Value(0)).current;
   const lockPulse = useRef(new Animated.Value(0)).current;
   const threatProgress = useRef(new Animated.Value(0)).current;
@@ -219,13 +272,22 @@ export function CameraScreen() {
 
   useEffect(() => {
     stableSince.current = null;
+    lastValidFaceAt.current = null;
     setScanStatus('searchingFace');
     setQualityMessage('Find a clear face');
     setFaceBounds(null);
     setPoseLandmarks([]);
     setPoseQuality(EMPTY_POSE_QUALITY);
+    setFaceEmbedding(null);
     setMockProfile(null);
-    profileCache.current = null;
+    setProfileSource(null);
+    setScanResult(null);
+    setScanSource(null);
+    setPossibleMatch(null);
+    setIsEditingName(false);
+    setDisplayNameDraft('');
+    setIsSavingName(false);
+    analysisAttempted.current = false;
     threatProgress.stopAnimation();
     threatProgress.setValue(0);
   }, [scanMode]);
@@ -241,16 +303,24 @@ export function CameraScreen() {
       return 'Face identity anchor secured';
     }
     if (scanStatus === 'tracking') {
-      return mockProfile ? 'Profile active · lock cached' : 'Body scan optional';
+      return mockProfile ? 'Base profile active · current loadout analyzed' : 'Body scan optional';
     }
     if (scanStatus === 'lostTracking') {
       return 'Trying to reacquire target';
     }
     if (scanStatus === 'completed') {
+      if (profileSource === 'ai') return 'AI profile generated';
+      if (profileSource === 'matched') return 'Existing profile matched';
       return 'Mock profile ready';
     }
+    if (scanStatus === 'possibleMatch') {
+      return `Possible match · ${Math.round((possibleMatch?.confidence ?? 0) * 100)}%`;
+    }
+    if (scanStatus === 'analyzing' && !faceEmbedding) {
+      return 'Generating face embedding...';
+    }
     return 'Mock processing...';
-  }, [mockProfile, qualityMessage, scanStatus]);
+  }, [faceEmbedding, mockProfile, possibleMatch, profileSource, qualityMessage, scanStatus]);
   const posePoints = useMemo<ScreenPoint[]>(() => poseLandmarks.map((landmark) => ({
     x: (cameraFacing === 'front' ? landmark.y : 1 - landmark.y) * screenWidth,
     y: landmark.x * screenHeight,
@@ -333,18 +403,11 @@ export function CameraScreen() {
     let delay = 700;
 
     if (scanStatus === 'faceLocked') {
-      const cached = profileCache.current;
-      if (cached && cached.expiresAt > Date.now()) {
-        setMockProfile(cached.profile);
-      }
       nextStatus = 'tracking';
       delay = 300;
-    } else if (scanStatus === 'tracking' && !mockProfile) {
+    } else if (scanStatus === 'tracking' && !mockProfile && !analysisAttempted.current) {
       nextStatus = 'analyzing';
       delay = scanMode === 'field' ? 900 : 350;
-    } else if (scanStatus === 'analyzing') {
-      nextStatus = 'completed';
-      delay = 1000;
     } else if (scanStatus === 'completed') {
       nextStatus = 'tracking';
       delay = 650;
@@ -355,15 +418,197 @@ export function CameraScreen() {
     }
 
     const timeout = setTimeout(() => {
-      if (nextStatus === 'completed') {
-        const profile = MOCK_PROFILE;
-        setMockProfile(profile);
-        profileCache.current = { profile, expiresAt: Number.POSITIVE_INFINITY };
-      }
       setScanStatus(nextStatus);
     }, delay);
     return () => clearTimeout(timeout);
   }, [mockProfile, scanMode, scanStatus]);
+
+  const completeScan = useCallback((
+    apiProfile: ApiTargetProfile,
+    apiScanResult: ApiScanResult,
+    source: ProfileSource,
+    apiScanSource: 'ai' | 'mock',
+  ) => {
+    const profile = toUiProfile(apiProfile);
+    setMockProfile(profile);
+    setProfileSource(source);
+    setScanResult(apiScanResult);
+    setScanSource(apiScanSource);
+    if (
+      scanMode === 'selfie'
+      && apiProfile.is_name_editable
+      && !apiProfile.is_public_figure
+      && apiProfile.display_name === '匿名'
+    ) {
+      setDisplayNameDraft('');
+      setIsEditingName(true);
+    }
+    setPossibleMatch(null);
+    setScanStatus('completed');
+  }, [scanMode]);
+
+  useEffect(() => {
+    if (scanStatus !== 'analyzing' || !faceEmbedding || analysisAttempted.current) {
+      return;
+    }
+
+    analysisAttempted.current = true;
+    const controller = new AbortController();
+
+    const analyzeTarget = async () => {
+      try {
+        const scan = await scanFace(faceEmbedding, controller.signal);
+        const photo = await camera.current?.takePhoto({ enableShutterSound: false });
+        if (!photo?.path) {
+          throw new Error('Scan image unavailable.');
+        }
+        let apiProfile: ApiTargetProfile;
+        let apiScanResult: ApiScanResult;
+        let apiScanSource: 'ai' | 'mock';
+        let source: ProfileSource;
+        if (
+          scan.matchStatus === 'possible'
+          && scan.targetId
+          && scan.temporaryScanId
+        ) {
+          const target = await getTarget(scan.targetId, controller.signal);
+          setPossibleMatch({
+            targetId: scan.targetId,
+            temporaryScanId: scan.temporaryScanId,
+            profile: target.profile,
+            confidence: scan.confidence ?? 0,
+            photoPath: photo.path,
+          });
+          setQualityMessage('Confirm identity or create a new version');
+          setScanStatus('possibleMatch');
+          return;
+        }
+
+        if (scan.matchStatus === 'confirmed' && scan.targetId) {
+          const analyzed = await analyzeTargetScan(scan.targetId, photo.path, controller.signal);
+          apiProfile = analyzed.profile;
+          apiScanResult = analyzed.scan_result;
+          apiScanSource = analyzed.generationSource;
+          source = 'matched';
+          setQualityMessage('Existing profile · current scan updated');
+        } else if (scan.matchStatus === 'new' && scan.temporaryScanId) {
+          const generated = await generateTarget(
+            scan.temporaryScanId,
+            faceEmbedding,
+            scanMode,
+            photo.path,
+            controller.signal,
+          );
+          apiProfile = generated.profile;
+          apiScanResult = generated.scan_result;
+          apiScanSource = generated.generationSource;
+          source = generated.generationSource;
+          setQualityMessage(
+            generated.generationSource === 'ai'
+              ? 'AI profile generated'
+              : 'Mock profile generated',
+          );
+        } else {
+          throw new Error('Invalid scan response.');
+        }
+
+        completeScan(apiProfile, apiScanResult, source, apiScanSource);
+      } catch (error) {
+        if ((error as Error).name === 'AbortError') {
+          return;
+        }
+        setQualityMessage(
+          (error as Error).message.toLowerCase().includes('scan image')
+            ? 'Scan image unavailable'
+            : 'Backend unavailable',
+        );
+        setScanStatus('tracking');
+      }
+    };
+
+    analyzeTarget();
+    return () => controller.abort();
+  }, [completeScan, faceEmbedding, scanMode, scanStatus]);
+
+  const handleConfirmPossibleMatch = useCallback(async () => {
+    if (!possibleMatch) return;
+    setScanStatus('analyzing');
+    try {
+      await confirmTargetMatch(possibleMatch.targetId, possibleMatch.temporaryScanId);
+      const analyzed = await analyzeTargetScan(possibleMatch.targetId, possibleMatch.photoPath);
+      setQualityMessage('Face variant confirmed · current scan updated');
+      completeScan(analyzed.profile, analyzed.scan_result, 'matched', analyzed.generationSource);
+    } catch {
+      setQualityMessage('Unable to confirm match');
+      setScanStatus('possibleMatch');
+    }
+  }, [completeScan, possibleMatch]);
+
+  const handleCreatePossibleMatch = useCallback(async () => {
+    if (!possibleMatch || !faceEmbedding) return;
+    setScanStatus('analyzing');
+    try {
+      const generated = await generateTarget(
+        possibleMatch.temporaryScanId,
+        faceEmbedding,
+        scanMode,
+        possibleMatch.photoPath,
+      );
+      setQualityMessage('New character version created');
+      completeScan(
+        generated.profile,
+        generated.scan_result,
+        generated.generationSource,
+        generated.generationSource,
+      );
+    } catch {
+      setQualityMessage('Unable to create target');
+      setScanStatus('possibleMatch');
+    }
+  }, [completeScan, faceEmbedding, possibleMatch, scanMode]);
+
+  const handleRescanLoadout = useCallback(() => {
+    stableSince.current = null;
+    lastValidFaceAt.current = null;
+    analysisAttempted.current = false;
+    setFaceEmbedding(null);
+    setMockProfile(null);
+    setProfileSource(null);
+    setScanResult(null);
+    setScanSource(null);
+    setPossibleMatch(null);
+    setQualityMessage('Hold still for a new loadout scan');
+    setScanStatus('searchingFace');
+  }, []);
+
+  const handleEditDisplayName = useCallback(() => {
+    if (!mockProfile) return;
+    setDisplayNameDraft(mockProfile.displayName === '匿名' ? '' : mockProfile.displayName);
+    setIsEditingName(true);
+  }, [mockProfile]);
+
+  const handleSaveDisplayName = useCallback(async () => {
+    if (!mockProfile || scanMode !== 'selfie') return;
+    const displayName = displayNameDraft.trim();
+    if (!displayName) {
+      setQualityMessage('Display name cannot be empty');
+      return;
+    }
+
+    setIsSavingName(true);
+    try {
+      const updated = await updateTargetDisplayName(mockProfile.id, displayName, scanMode);
+      setMockProfile((current) => current
+        ? { ...current, displayName: updated.profile.display_name }
+        : current);
+      setIsEditingName(false);
+      setQualityMessage('Display name updated');
+    } catch {
+      setQualityMessage('Unable to update display name');
+    } finally {
+      setIsSavingName(false);
+    }
+  }, [displayNameDraft, mockProfile, scanMode]);
 
   useEffect(() => {
     if (scanStatus !== 'lostTracking') {
@@ -371,26 +616,30 @@ export function CameraScreen() {
     }
 
     const timeout = setTimeout(() => {
-      if (mockProfile) {
-        profileCache.current = {
-          profile: mockProfile,
-          expiresAt: Date.now() + LOCK_CACHE_MS,
-        };
-      }
       stableSince.current = null;
+      lastValidFaceAt.current = null;
       setFaceBounds(null);
       setPoseLandmarks([]);
       setPoseQuality(EMPTY_POSE_QUALITY);
+      setFaceEmbedding(null);
       setMockProfile(null);
+      setProfileSource(null);
+      setScanResult(null);
+      setScanSource(null);
+      analysisAttempted.current = false;
       setQualityMessage('Find a clear face');
       setScanStatus('searchingFace');
     }, LOST_TRACKING_TIMEOUT_MS);
 
     return () => clearTimeout(timeout);
-  }, [mockProfile, scanStatus]);
+  }, [scanStatus]);
 
   const handleFacesDetected = useCallback((faces: DetectedFace[]) => {
     const face = faces[0];
+
+    if (scanStatus === 'possibleMatch') {
+      return;
+    }
 
     if (scanStatus === 'lostTracking') {
       if (face) {
@@ -408,13 +657,25 @@ export function CameraScreen() {
         return;
       }
 
+      if (!mockProfile) {
+        analysisAttempted.current = false;
+      }
       setQualityMessage('Signal lost');
       setScanStatus('lostTracking');
       return;
     }
 
     if (!face) {
+      const now = Date.now();
+      if (
+        scanStatus === 'faceDetected'
+        && lastValidFaceAt.current !== null
+        && now - lastValidFaceAt.current <= FACE_DETECTION_GRACE_MS
+      ) {
+        return;
+      }
       stableSince.current = null;
+      lastValidFaceAt.current = null;
       setFaceBounds(null);
       setScanStatus('searchingFace');
       setQualityMessage('Find a clear face');
@@ -431,6 +692,7 @@ export function CameraScreen() {
     const faceIsLargeEnough = bounds.width / screenWidth >= minimumFaceWidth;
     if (!faceIsLargeEnough) {
       stableSince.current = null;
+      lastValidFaceAt.current = null;
       setQualityMessage('Move closer');
       return;
     }
@@ -441,25 +703,38 @@ export function CameraScreen() {
     const centerOffsetY = Math.abs(faceCenterY - screenHeight / 2) / screenHeight;
     const yaw = Math.abs(face.yawAngle ?? 0);
     const roll = Math.abs(face.rollAngle ?? 0);
-    const faceIsCentered = centerOffsetX <= MAX_CENTER_OFFSET_RATIO
-      && centerOffsetY <= MAX_CENTER_OFFSET_RATIO;
-    const faceIsForward = yaw <= MAX_ANGLE && roll <= MAX_ANGLE;
+    const faceIsCentered = centerOffsetX <= MAX_CENTER_OFFSET_X_RATIO
+      && centerOffsetY <= MAX_CENTER_OFFSET_Y_RATIO;
+    const faceIsForward = yaw <= MAX_YAW_ANGLE && roll <= MAX_ROLL_ANGLE;
+    const withinQualityGrace = lastValidFaceAt.current !== null
+      && Date.now() - lastValidFaceAt.current <= FACE_DETECTION_GRACE_MS;
 
-    if (!faceIsCentered || !faceIsForward) {
+    if (!faceIsCentered) {
+      if (withinQualityGrace) return;
       stableSince.current = null;
-      setQualityMessage('Face forward');
+      lastValidFaceAt.current = null;
+      setQualityMessage('Move face toward center');
+      return;
+    }
+
+    if (!faceIsForward) {
+      if (withinQualityGrace) return;
+      stableSince.current = null;
+      lastValidFaceAt.current = null;
+      setQualityMessage('Turn slightly toward camera');
       return;
     }
 
     setQualityMessage('Hold still');
     const now = Date.now();
+    lastValidFaceAt.current = now;
     stableSince.current ??= now;
     if (now - stableSince.current >= REQUIRED_STABLE_MS) {
       setQualityMessage('Identity ready');
       setScanStatus('faceLocked');
       return;
     }
-  }, [scanMode, scanStatus, screenHeight, screenWidth]);
+  }, [mockProfile, scanMode, scanStatus, screenHeight, screenWidth]);
 
   const handleScanResult = useCallback((result: NativeScanResult | null) => {
     const faces = (result?.faces ?? []).map((face): DetectedFace => ({
@@ -480,7 +755,23 @@ export function CameraScreen() {
       setPoseLandmarks(landmarks);
       setPoseQuality(evaluatePose(landmarks));
     }
-  }, [handleFacesDetected, scanMode, scanStatus, screenHeight, screenWidth]);
+    if (!faceEmbedding && result?.embedding?.length) {
+      const quality = result.faceQuality;
+      if (quality && quality.brightness < MIN_FACE_BRIGHTNESS) {
+        setQualityMessage('Improve lighting');
+        return;
+      }
+      if (quality && quality.brightness > MAX_FACE_BRIGHTNESS) {
+        setQualityMessage('Reduce lighting');
+        return;
+      }
+      if (quality && quality.sharpness < MIN_FACE_SHARPNESS) {
+        setQualityMessage('Hold still · image blurred');
+        return;
+      }
+      setFaceEmbedding(result.embedding);
+    }
+  }, [faceEmbedding, handleFacesDetected, scanMode, scanStatus, screenHeight, screenWidth]);
   const reportScanToJS = useMemo(
     () => Worklets.createRunOnJS(handleScanResult),
     [handleScanResult],
@@ -493,10 +784,13 @@ export function CameraScreen() {
         reportScanToJS(null);
         return;
       }
-      const result = posePlugin.call(frame, { cameraFacing }) as unknown as NativeScanResult | null;
+      const result = posePlugin.call(frame, {
+        cameraFacing,
+        generateEmbedding: scanStatus === 'analyzing' && faceEmbedding === null,
+      }) as unknown as NativeScanResult | null;
       reportScanToJS(result);
     });
-  }, [cameraFacing, reportScanToJS]);
+  }, [cameraFacing, faceEmbedding, reportScanToJS, scanStatus]);
 
   if (!permissionChecked) {
     return (
@@ -542,6 +836,7 @@ export function CameraScreen() {
         isActive
         frameProcessor={frameProcessor}
         pixelFormat="rgb"
+        photo
       />
 
       <SafeAreaView pointerEvents="box-none" style={styles.overlay}>
@@ -713,6 +1008,31 @@ export function CameraScreen() {
               <Text style={styles.metric}>MODE {scanMode.toUpperCase()}</Text>
               <Text style={styles.metric}>LOCK {isLocked ? 'YES' : 'NO'}</Text>
             </View>
+            {possibleMatch && (
+              <View style={styles.possibleMatchPanel}>
+                <Text style={styles.possibleMatchLabel}>POSSIBLE MATCH</Text>
+                <Text style={styles.possibleMatchName}>{possibleMatch.profile.codename}?</Text>
+                <Text style={styles.possibleMatchConfidence}>
+                  SIMILARITY {Math.round(possibleMatch.confidence * 100)}%
+                </Text>
+                <View style={styles.possibleMatchActions}>
+                  <Pressable
+                    accessibilityRole="button"
+                    onPress={handleConfirmPossibleMatch}
+                    style={[styles.matchAction, styles.matchActionConfirm]}
+                  >
+                    <Text style={styles.matchActionConfirmText}>CONFIRM</Text>
+                  </Pressable>
+                  <Pressable
+                    accessibilityRole="button"
+                    onPress={handleCreatePossibleMatch}
+                    style={[styles.matchAction, styles.matchActionNew]}
+                  >
+                    <Text style={styles.matchActionNewText}>CREATE NEW</Text>
+                  </Pressable>
+                </View>
+              </View>
+            )}
             {scanMode === 'field' && !mockProfile && (
               <>
                 <View style={styles.subjectRow}>
@@ -735,10 +1055,38 @@ export function CameraScreen() {
             )}
             {mockProfile && (
               <View style={styles.profilePanel}>
+                <View style={styles.identityRow}>
+                  <View>
+                    <Text style={styles.identityLabel}>DISPLAY NAME / 顯示名稱</Text>
+                    <Text style={styles.identityName}>{mockProfile.displayName}</Text>
+                  </View>
+                  {scanMode === 'selfie'
+                    && mockProfile.isNameEditable
+                    && !mockProfile.isPublicFigure
+                    && !isEditingName && (
+                      <Pressable
+                        accessibilityRole="button"
+                        onPress={handleEditDisplayName}
+                        style={styles.editNameButton}
+                      >
+                        <Text style={styles.editNameButtonText}>EDIT</Text>
+                      </Pressable>
+                  )}
+                </View>
+
                 <View style={styles.profileHeader}>
                   <View>
-                    <Text style={styles.profileLabel}>CODENAME / 代號</Text>
-                    <Text style={styles.profileName}>{mockProfile.codename}</Text>
+                    <Text style={styles.profileLabel}>CURRENT CODENAME / 當前稱號</Text>
+                    <Text style={styles.profileSource}>
+                      {profileSource === 'ai'
+                        ? 'AI GENERATED'
+                        : profileSource === 'matched'
+                          ? `MATCHED · ${scanSource === 'ai' ? 'AI SCAN' : 'MOCK SCAN'}`
+                          : 'MOCK'}
+                    </Text>
+                    <Text style={styles.profileName}>
+                      {scanResult?.scan_title ?? mockProfile.codename}
+                    </Text>
                   </View>
                   <View style={styles.threatBadge}>
                     <Text style={styles.threatBadgeLabel}>THREAT</Text>
@@ -748,9 +1096,9 @@ export function CameraScreen() {
 
                 <View style={styles.powerRow}>
                   <View>
-                    <Text style={styles.powerLabel}>BATTLE POWER / 戰力</Text>
+                    <Text style={styles.powerLabel}>BASE POWER / 基本戰力</Text>
                     <Text style={styles.powerValue}>
-                      {mockProfile.battlePower.toLocaleString('en-US')}
+                      {mockProfile.basePower.toLocaleString('en-US')}
                     </Text>
                   </View>
                   <View style={styles.levelBlock}>
@@ -758,6 +1106,42 @@ export function CameraScreen() {
                     <Text style={styles.levelValue}>LV. {mockProfile.level}</Text>
                   </View>
                 </View>
+
+                {scanResult && (
+                  <View style={styles.scanResultBlock}>
+                    <View style={styles.bonusRow}>
+                      <Text style={styles.bonusLabel}>EQUIPMENT / 裝備加成</Text>
+                      <Text style={styles.bonusValue}>+{scanResult.equipment_bonus}</Text>
+                    </View>
+                    <View style={styles.bonusRow}>
+                      <Text style={styles.bonusLabel}>STYLE / 服裝加成</Text>
+                      <Text style={styles.bonusValue}>+{scanResult.style_bonus}</Text>
+                    </View>
+                    <View style={styles.bonusRow}>
+                      <Text style={styles.bonusLabel}>POSE / 姿勢加成</Text>
+                      <Text style={styles.bonusValue}>+{scanResult.pose_bonus}</Text>
+                    </View>
+                    <View style={styles.currentPowerRow}>
+                      <Text style={styles.currentPowerLabel}>CURRENT POWER / 目前戰力</Text>
+                      <Text style={styles.currentPowerValue}>
+                        {scanResult.current_power.toLocaleString('en-US')}
+                      </Text>
+                    </View>
+                    <Text style={styles.scanStatus}>{scanResult.current_status}</Text>
+                    {scanResult.detected_items.length > 0 && (
+                      <Text style={styles.detectedItems}>
+                        ITEMS · {scanResult.detected_items.join(' · ')}
+                      </Text>
+                    )}
+                    <Pressable
+                      accessibilityRole="button"
+                      onPress={handleRescanLoadout}
+                      style={styles.rescanButton}
+                    >
+                      <Text style={styles.rescanButtonText}>RESCAN LOADOUT</Text>
+                    </Pressable>
+                  </View>
+                )}
 
                 <View style={styles.abilityGrid}>
                   {([
@@ -783,6 +1167,51 @@ export function CameraScreen() {
           </View>
         </View>
       </SafeAreaView>
+
+      <Modal
+        animationType="fade"
+        onRequestClose={() => setIsEditingName(false)}
+        transparent
+        visible={isEditingName}
+      >
+        <View style={styles.nameModalBackdrop}>
+          <View style={styles.nameModalPanel}>
+            <Text style={styles.namePrompt}>要設定你的名稱嗎？</Text>
+            <Text style={styles.nameModalCopy}>這只會修改你的 Display Name，AI 稱號仍會隨裝備改變。</Text>
+            <TextInput
+              autoCapitalize="words"
+              autoCorrect={false}
+              editable={!isSavingName}
+              maxLength={40}
+              onChangeText={setDisplayNameDraft}
+              onSubmitEditing={handleSaveDisplayName}
+              placeholder="輸入顯示名稱"
+              placeholderTextColor="#66736e"
+              returnKeyType="done"
+              style={styles.nameInput}
+              value={displayNameDraft}
+            />
+            <View style={styles.nameEditorActions}>
+              <Pressable
+                accessibilityRole="button"
+                disabled={isSavingName}
+                onPress={() => setIsEditingName(false)}
+                style={styles.nameCancelButton}
+              >
+                <Text style={styles.nameCancelText}>CANCEL</Text>
+              </Pressable>
+              <Pressable
+                accessibilityRole="button"
+                disabled={isSavingName}
+                onPress={handleSaveDisplayName}
+                style={styles.nameSaveButton}
+              >
+                <Text style={styles.nameSaveText}>{isSavingName ? 'SAVING' : 'SAVE'}</Text>
+              </Pressable>
+            </View>
+          </View>
+        </View>
+      </Modal>
     </View>
   );
 }
@@ -927,6 +1356,22 @@ const styles = StyleSheet.create({
   threatFillLocked: { backgroundColor: '#7ef9c6' },
   metricsRow: { flexDirection: 'row', justifyContent: 'space-between', marginTop: 10 },
   metric: { color: '#94a59e', fontSize: 9, fontWeight: '700' },
+  possibleMatchPanel: {
+    marginTop: 12,
+    padding: 12,
+    borderWidth: 1,
+    borderColor: '#f0c85a',
+    backgroundColor: 'rgba(240, 200, 90, 0.1)',
+  },
+  possibleMatchLabel: { color: '#f0c85a', fontSize: 9, fontWeight: '900' },
+  possibleMatchName: { marginTop: 4, color: '#ffffff', fontSize: 20, fontWeight: '900' },
+  possibleMatchConfidence: { marginTop: 3, color: '#aebbb6', fontSize: 9, fontWeight: '700' },
+  possibleMatchActions: { flexDirection: 'row', gap: 8, marginTop: 10 },
+  matchAction: { flex: 1, height: 38, alignItems: 'center', justifyContent: 'center' },
+  matchActionConfirm: { backgroundColor: '#7ef9c6' },
+  matchActionNew: { borderWidth: 1, borderColor: '#f0c85a' },
+  matchActionConfirmText: { color: '#07110d', fontSize: 10, fontWeight: '900' },
+  matchActionNewText: { color: '#f0c85a', fontSize: 10, fontWeight: '900' },
   subjectRow: {
     flexDirection: 'row',
     alignItems: 'flex-end',
@@ -948,12 +1393,72 @@ const styles = StyleSheet.create({
     borderTopWidth: 1,
     borderTopColor: 'rgba(126, 249, 198, 0.45)',
   },
+  identityRow: {
+    marginBottom: 10,
+    paddingBottom: 9,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    borderBottomWidth: 1,
+    borderBottomColor: 'rgba(148, 165, 158, 0.25)',
+  },
+  identityLabel: { color: '#94a59e', fontSize: 8, fontWeight: '800' },
+  identityName: { marginTop: 2, color: '#ffffff', fontSize: 18, fontWeight: '900' },
+  editNameButton: {
+    minWidth: 54,
+    height: 30,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1,
+    borderColor: '#7ef9c6',
+  },
+  editNameButtonText: { color: '#7ef9c6', fontSize: 9, fontWeight: '900' },
+  nameModalBackdrop: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: 24,
+    backgroundColor: 'rgba(0, 0, 0, 0.72)',
+  },
+  nameModalPanel: {
+    width: '100%',
+    maxWidth: 380,
+    padding: 16,
+    borderWidth: 1,
+    borderColor: '#7ef9c6',
+    backgroundColor: '#09110e',
+  },
+  namePrompt: { color: '#ffffff', fontSize: 18, fontWeight: '900' },
+  nameModalCopy: { marginTop: 6, color: '#94a59e', fontSize: 11, lineHeight: 17 },
+  nameInput: {
+    height: 38,
+    marginTop: 7,
+    paddingHorizontal: 10,
+    color: '#ffffff',
+    fontSize: 14,
+    fontWeight: '700',
+    borderWidth: 1,
+    borderColor: 'rgba(126, 249, 198, 0.5)',
+    backgroundColor: 'rgba(5, 8, 7, 0.65)',
+  },
+  nameEditorActions: { flexDirection: 'row', gap: 8, marginTop: 8 },
+  nameCancelButton: { flex: 1, height: 32, alignItems: 'center', justifyContent: 'center' },
+  nameCancelText: { color: '#94a59e', fontSize: 9, fontWeight: '900' },
+  nameSaveButton: {
+    flex: 1,
+    height: 32,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#7ef9c6',
+  },
+  nameSaveText: { color: '#07110d', fontSize: 9, fontWeight: '900' },
   profileHeader: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
   },
   profileLabel: { color: '#7ef9c6', fontSize: 9, fontWeight: '800' },
+  profileSource: { marginTop: 3, color: '#f2c14e', fontSize: 10, fontWeight: '900' },
   profileName: { marginTop: 3, color: '#ffffff', fontSize: 24, fontWeight: '900' },
   threatBadge: {
     minWidth: 58,
@@ -987,6 +1492,38 @@ const styles = StyleSheet.create({
   levelBlock: { alignItems: 'flex-end', paddingBottom: 4 },
   levelLabel: { color: '#94a59e', fontSize: 8, fontWeight: '800' },
   levelValue: { marginTop: 3, color: '#ffffff', fontSize: 16, fontWeight: '900' },
+  scanResultBlock: {
+    marginTop: 9,
+    padding: 9,
+    borderWidth: 1,
+    borderColor: 'rgba(240, 200, 90, 0.4)',
+    backgroundColor: 'rgba(240, 200, 90, 0.07)',
+  },
+  bonusRow: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 3 },
+  bonusLabel: { color: '#aebbb6', fontSize: 8, fontWeight: '700' },
+  bonusValue: { color: '#f0c85a', fontSize: 10, fontWeight: '900', fontVariant: ['tabular-nums'] },
+  currentPowerRow: {
+    marginTop: 4,
+    paddingTop: 6,
+    flexDirection: 'row',
+    alignItems: 'flex-end',
+    justifyContent: 'space-between',
+    borderTopWidth: 1,
+    borderTopColor: 'rgba(240, 200, 90, 0.3)',
+  },
+  currentPowerLabel: { color: '#f0c85a', fontSize: 8, fontWeight: '900' },
+  currentPowerValue: { color: '#ffffff', fontSize: 24, fontWeight: '900', fontVariant: ['tabular-nums'] },
+  scanStatus: { marginTop: 5, color: '#7ef9c6', fontSize: 10, fontWeight: '800' },
+  detectedItems: { marginTop: 3, color: '#94a59e', fontSize: 8, fontWeight: '700' },
+  rescanButton: {
+    height: 34,
+    marginTop: 8,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1,
+    borderColor: '#7ef9c6',
+  },
+  rescanButtonText: { color: '#7ef9c6', fontSize: 9, fontWeight: '900' },
   abilityGrid: { flexDirection: 'row', gap: 5, marginTop: 10 },
   abilityItem: {
     flex: 1,

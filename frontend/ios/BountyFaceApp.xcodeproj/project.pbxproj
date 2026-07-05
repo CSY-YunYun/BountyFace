@@ -16,6 +16,7 @@
 		D10000000000000000000001 /* PoseLandmarkerPlugin.swift in Sources */ = {isa = PBXBuildFile; fileRef = D10000000000000000000011 /* PoseLandmarkerPlugin.swift */; };
 		D10000000000000000000002 /* PoseLandmarkerPlugin.m in Sources */ = {isa = PBXBuildFile; fileRef = D10000000000000000000012 /* PoseLandmarkerPlugin.m */; };
 		D10000000000000000000003 /* pose_landmarker_full.task in Resources */ = {isa = PBXBuildFile; fileRef = D10000000000000000000013 /* pose_landmarker_full.task */; };
+		D10000000000000000000004 /* mobile_face_net.tflite in Resources */ = {isa = PBXBuildFile; fileRef = D10000000000000000000014 /* mobile_face_net.tflite */; };
 		F11748422D0307B40044C1D9 /* AppDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = F11748412D0307B40044C1D9 /* AppDelegate.swift */; };
 /* End PBXBuildFile section */
 
@@ -31,6 +32,7 @@
 		D10000000000000000000011 /* PoseLandmarkerPlugin.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = PoseLandmarkerPlugin.swift; path = BountyFaceApp/PoseLandmarkerPlugin.swift; sourceTree = "<group>"; };
 		D10000000000000000000012 /* PoseLandmarkerPlugin.m */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; name = PoseLandmarkerPlugin.m; path = BountyFaceApp/PoseLandmarkerPlugin.m; sourceTree = "<group>"; };
 		D10000000000000000000013 /* pose_landmarker_full.task */ = {isa = PBXFileReference; lastKnownFileType = file; name = pose_landmarker_full.task; path = BountyFaceApp/pose_landmarker_full.task; sourceTree = "<group>"; };
+		D10000000000000000000014 /* mobile_face_net.tflite */ = {isa = PBXFileReference; lastKnownFileType = file; name = mobile_face_net.tflite; path = BountyFaceApp/mobile_face_net.tflite; sourceTree = "<group>"; };
 		D5E43F5D8E1EF744D70BCE19 /* Pods-BountyFaceApp.release.xcconfig */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xcconfig; name = "Pods-BountyFaceApp.release.xcconfig"; path = "Target Support Files/Pods-BountyFaceApp/Pods-BountyFaceApp.release.xcconfig"; sourceTree = "<group>"; };
 		D64A2FB41768441D0BD6BD37 /* Pods-BountyFaceApp.debug.xcconfig */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xcconfig; name = "Pods-BountyFaceApp.debug.xcconfig"; path = "Target Support Files/Pods-BountyFaceApp/Pods-BountyFaceApp.debug.xcconfig"; sourceTree = "<group>"; };
 		ED297162215061F000B7C4FE /* JavaScriptCore.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = JavaScriptCore.framework; path = System/Library/Frameworks/JavaScriptCore.framework; sourceTree = SDKROOT; };
@@ -58,6 +60,7 @@
 				D10000000000000000000011 /* PoseLandmarkerPlugin.swift */,
 				D10000000000000000000012 /* PoseLandmarkerPlugin.m */,
 				D10000000000000000000013 /* pose_landmarker_full.task */,
+				D10000000000000000000014 /* mobile_face_net.tflite */,
 				BB2F792B24A3F905000567C9 /* Supporting */,
 				13B07FB51A68108700A75B9A /* Images.xcassets */,
 				13B07FB61A68108700A75B9A /* Info.plist */,
@@ -203,6 +206,7 @@
 			files = (
 				BB2F792D24A3F905000567C9 /* Expo.plist in Resources */,
 				D10000000000000000000003 /* pose_landmarker_full.task in Resources */,
+				D10000000000000000000004 /* mobile_face_net.tflite in Resources */,
 				13B07FBF1A68108700A75B9A /* Images.xcassets in Resources */,
 				3E461D99554A48A4959DE609 /* SplashScreen.storyboard in Resources */,
 				A66E63FC657A4BB1654481D0 /* PrivacyInfo.xcprivacy in Resources */,
@@ -285,6 +289,8 @@
 				"${PODS_CONFIGURATION_BUILD_DIR}/ExpoFileSystem/ExpoFileSystem_privacy.bundle",
 				"${PODS_CONFIGURATION_BUILD_DIR}/React-Core/React-Core_privacy.bundle",
 				"${PODS_CONFIGURATION_BUILD_DIR}/React-cxxreact/React-cxxreact_privacy.bundle",
+				"${PODS_CONFIGURATION_BUILD_DIR}/TensorFlowLiteC/TensorFlowLiteC.bundle",
+				"${PODS_CONFIGURATION_BUILD_DIR}/TensorFlowLiteSwift/TensorFlowLite.bundle",
 				"${PODS_CONFIGURATION_BUILD_DIR}/expo-dev-launcher/EXDevLauncher.bundle",
 				"${PODS_CONFIGURATION_BUILD_DIR}/expo-dev-menu/EXDevMenu.bundle",
 			);
@@ -295,6 +301,8 @@
 				"${TARGET_BUILD_DIR}/${UNLOCALIZED_RESOURCES_FOLDER_PATH}/ExpoFileSystem_privacy.bundle",
 				"${TARGET_BUILD_DIR}/${UNLOCALIZED_RESOURCES_FOLDER_PATH}/React-Core_privacy.bundle",
 				"${TARGET_BUILD_DIR}/${UNLOCALIZED_RESOURCES_FOLDER_PATH}/React-cxxreact_privacy.bundle",
+				"${TARGET_BUILD_DIR}/${UNLOCALIZED_RESOURCES_FOLDER_PATH}/TensorFlowLiteC.bundle",
+				"${TARGET_BUILD_DIR}/${UNLOCALIZED_RESOURCES_FOLDER_PATH}/TensorFlowLite.bundle",
 				"${TARGET_BUILD_DIR}/${UNLOCALIZED_RESOURCES_FOLDER_PATH}/EXDevLauncher.bundle",
 				"${TARGET_BUILD_DIR}/${UNLOCALIZED_RESOURCES_FOLDER_PATH}/EXDevMenu.bundle",
 			);

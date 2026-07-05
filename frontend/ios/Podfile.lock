@@ -1891,6 +1891,15 @@ PODS:
     - React-utils (= 0.81.5)
     - ReactNativeDependencies
   - ReactNativeDependencies (0.81.5)
+  - TensorFlowLiteC (2.17.0):
+    - TensorFlowLiteC/Core (= 2.17.0)
+  - TensorFlowLiteC/Core (2.17.0)
+  - TensorFlowLiteSwift (2.17.0):
+    - TensorFlowLiteSwift/Core (= 2.17.0)
+  - TensorFlowLiteSwift/Core (2.17.0):
+    - TensorFlowLiteC (= 2.17.0)
+    - TensorFlowLiteSwift/Privacy (= 2.17.0)
+  - TensorFlowLiteSwift/Privacy (2.17.0)
   - VisionCamera (4.7.3):
     - VisionCamera/Core (= 4.7.3)
     - VisionCamera/FrameProcessors (= 4.7.3)
@@ -1989,6 +1998,7 @@ DEPENDENCIES:
   - ReactCodegen (from `build/generated/ios`)
   - ReactCommon/turbomodule/core (from `../node_modules/react-native/ReactCommon`)
   - ReactNativeDependencies (from `../node_modules/react-native/third-party-podspecs/ReactNativeDependencies.podspec`)
+  - TensorFlowLiteSwift (~> 2.17.0)
   - VisionCamera (from `../node_modules/react-native-vision-camera`)
   - Yoga (from `../node_modules/react-native/ReactCommon/yoga`)
 
@@ -1996,6 +2006,8 @@ SPEC REPOS:
   trunk:
     - MediaPipeTasksCommon
     - MediaPipeTasksVision
+    - TensorFlowLiteC
+    - TensorFlowLiteSwift
 
 EXTERNAL SOURCES:
   EXConstants:
@@ -2250,9 +2262,11 @@ SPEC CHECKSUMS:
   ReactCodegen: 7d4593f7591f002d137fe40cef3f6c11f13c88cc
   ReactCommon: 08810150b1206cc44aecf5f6ae19af32f29151a8
   ReactNativeDependencies: 71ce9c28beb282aa720ea7b46980fff9669f428a
+  TensorFlowLiteC: eac6d689a8d391d1b202dc59e3d9165ba64aaf73
+  TensorFlowLiteSwift: 723fe42222815e72490c79feeff05305530de393
   VisionCamera: 0044a94f7489f19e19d5938e97dfc36f4784af3c
   Yoga: 5934998fbeaef7845dbf698f698518695ab4cd1a
 
-PODFILE CHECKSUM: 666e0a31bedc35e2a2f5986bc2cbe98f0391a5a1
+PODFILE CHECKSUM: a4d5a5d32e4293af1f34b572a49de5ca80036540
 
 COCOAPODS: 1.16.2

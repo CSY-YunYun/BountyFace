@@ -1,16 +1,12 @@
-# 🎯 BountyFace
+# BountyFace
 
 [English](#english) | [繁體中文](#繁體中文)
 
----
+## Project Structure
 
-## Project structure
-
-* Frontend: [frontend](frontend)
-* Backend: [backend](backend)
-* Design chart: [systemDesignChart.png](systemDesignChart.png)
-
-## System design chart
+- Frontend: [`frontend`](frontend)
+- Backend: [`server`](server)
+- System design: [`systemDesignChart.png`](systemDesignChart.png)
 
 ![System design chart](systemDesignChart.png)
 
@@ -18,340 +14,380 @@
 
 ## English
 
-Cyberpunk-style facial scanner that detects individuals against a high-risk entity database to dynamically render gamified "Threat Levels," contextual danger titles, and safety risk attributes in real-time.
+BountyFace is a cyberpunk RPG scanner. Identity is matched from an on-device
+face embedding. A temporary scan image is used only to generate the current AI
+codename, visible equipment, style, pose, and gameplay bonuses.
 
-### 1. Core Philosophy: Privacy-First Ephemeral Image Processing
+### Current Implementation
 
-In this field mission, your mobile device acts as an advanced Cyber-Scanner. **BountyFace** extracts 512-dimensional face feature vectors directly on the local device and uses them as the primary identity-matching token.
+- React Native with Expo SDK 54 and VisionCamera.
+- SE-MobileFaceNet TensorFlow Lite inference on iPhone.
+- 256-dimensional, L2-normalized face embeddings.
+- FastAPI with in-memory targets. Restarting the server clears all targets.
+- GPT-5.5 vision with Structured Outputs for fictional RPG analysis.
+- No database yet. Supabase `pgvector` is the next persistence stage.
+- Raw scan images are processed in memory and are not stored.
 
-For existing targets, only the face embedding is transmitted to the backend for similarity search. When a new target is detected, a single captured scan image may be temporarily uploaded to the backend for gameplay attribute analysis. The image is processed in memory and immediately discarded after analysis. No raw image is stored in the database or any persistent storage.
+### Data Model
 
-### 2. Tech Stack
-
-* **Frontend:** React Native (Expo SDK 52 / Architecture 22) - Handles real-time camera frame processing, face detection, pose/person scanning, and local biometric tokenization.
-* **Backend:** Python FastAPI (Deployed on Google Cloud Run) - Lightweight orchestration layer for managing identity matching, temporary gameplay analysis, and game-logic verification.
-* **Database:** Supabase (PostgreSQL) with `pgvector` & HNSW indexing - Secures and indexes mathematical feature embeddings with sub-millisecond retrieval.
-
-### 3. Architecture Boundaries & Constraints
-
-* **Privacy-First Biometric Processing:**
-  Face embeddings are extracted on the local device and used as the primary identity-matching token. For existing targets, only the embedding is transmitted to the backend. When a new target is detected, a single captured image may be temporarily uploaded for gameplay attribute analysis. The image is processed in memory and immediately discarded. No raw image is stored in the database or persistent storage.
-
-* **Zero Persistent Image Storage:**
-  When a new target is detected, a single captured image may be temporarily uploaded to the backend for gameplay attribute analysis. The image is processed in memory and immediately discarded after analysis. Only the generated face embedding and game profile are permanently stored.
-
-* **Lightweight Single-Instance Architecture:**
-  To keep the architecture lean and cost-efficient, this project deliberately avoids heavy, distributed vector databases (e.g., Milvus, Qdrant) or complex cluster load-balancing. Instead, a single-instance PostgreSQL database equipped with HNSW indexing (via Supabase `pgvector`) is utilized, providing sub-millisecond retrieval speeds that perfectly match the game's sandbox volume.
-
-### 4. API Design
-
-### Send face embedding to server
-
-`POST /v1/scan`
-
-Request body:
+Identity-bound base profile:
 
 ```json
 {
-  "faceEmbedding": [0.0123, -0.4567, 0.8912]
+  "id": "target-uuid",
+  "display_name": "Anonymous target",
+  "codename": "Current AI codename",
+  "base_power": 9842,
+  "threat_level": "S",
+  "level": 87,
+  "str": 82,
+  "dex": 91,
+  "int": 35,
+  "luk": 99,
+  "description": "Persistent base character description.",
+  "is_public_figure": false,
+  "is_name_editable": false
 }
 ```
-If a matching or similar face exists in the database:
+
+Per-scan result:
+
+```json
+{
+  "scan_title": "Thunder Vanguard",
+  "equipment_bonus": 350,
+  "style_bonus": 120,
+  "pose_bonus": 80,
+  "current_power": 10392,
+  "detected_items": ["Katana", "Black coat"],
+  "current_status": "Combat ready"
+}
+```
+
+```text
+current_power = base_power + equipment_bonus + style_bonus + pose_bonus
+```
+
+The AI chooses categorical equipment/style/pose tiers. FastAPI converts those
+tiers to deterministic bonus values. Base stats never change during a loadout
+rescan.
+
+### Identity Matching
+
+Each target can hold up to eight face embeddings. A query is compared against
+all embeddings and uses the highest cosine similarity.
+
+```text
+similarity >= 0.75       confirmed match
+0.45 <= similarity < .75 possible match; user confirms or creates a new target
+similarity < 0.45        new target
+```
+
+Confirmed scans automatically add high-quality appearance variants. Confirming
+a possible match also adds the new embedding to that target.
+
+### Display Name Rules
+
+```text
+Selfie Mode: new display_name="匿名", editable only in Selfie Mode
+Field Mode:  new display_name="匿名目標", never editable by the scanner
+Public/Admin: fixed display_name, never editable
+```
+
+`display_name` is user/admin-owned. `codename` is AI-generated and may change
+with the current equipment and appearance.
+
+### API
+
+#### Health
+
+`GET /health`
+
+```json
+{
+  "status": "ok",
+  "aiConfigured": true,
+  "profileModel": "gpt-5.5",
+  "storage": "memory"
+}
+```
+
+#### Match Face Embedding
+
+`POST /v1/scan`
+
+```json
+{ "faceEmbedding": [0.0123, -0.4567, 0.8912] }
+```
+
+Confirmed response:
 
 ```json
 {
   "status": "SUCCESS",
+  "matchStatus": "confirmed",
   "matchFound": true,
-  "targetId": "uuid-v4-cool-string",
-  "confidence": 0.92,
+  "targetId": "target-uuid",
+  "confidence": 0.91,
   "message": "Target identified successfully."
 }
 ```
 
-If no matching face exists in the database:
+Possible response:
 
 ```json
 {
   "status": "SUCCESS",
+  "matchStatus": "possible",
   "matchFound": false,
-  "temporaryScanId": "temp-uuid-v4-string",
+  "targetId": "candidate-target-uuid",
+  "temporaryScanId": "temp-uuid",
+  "confidence": 0.63,
+  "message": "Possible target match. Confirmation required."
+}
+```
+
+New response:
+
+```json
+{
+  "status": "SUCCESS",
+  "matchStatus": "new",
+  "matchFound": false,
+  "temporaryScanId": "temp-uuid",
+  "confidence": 0.31,
   "message": "New face detected. Please generate a profile."
 }
 ```
 
----
-
-### Receive target profile
+#### Get Base Profile
 
 `GET /v1/targets/{targetId}`
 
+```json
+{ "status": "SUCCESS", "profile": { "id": "target-uuid", "display_name": "Joey" } }
+```
+
+#### Confirm Possible Match
+
+`POST /v1/targets/{targetId}/confirm`
+
+```json
+{ "temporaryScanId": "temp-uuid" }
+```
+
+The pending embedding is added to the existing target.
+
+#### Analyze Current Loadout
+
+`POST /v1/targets/{targetId}/analyze`
+
+Content type: `multipart/form-data`
+
+```text
+scanImage: JPEG, PNG, or WebP; maximum 10 MB
+```
+
 Response:
 
 ```json
 {
   "status": "SUCCESS",
-  "profile": {
-    "id": "uuid-v4-cool-string",
-    "codename": "Obsidian",
-    "battle_power": 9842,
-    "threat_level": "S",
-    "level": 87,
-    "str": 82,
-    "dex": 91,
-    "int": 35,
-    "luk": 99,
-    "description": "A highly agile target specializing in rapid movement and surprise attacks, frequently appearing in urban night zones.",
-    "is_public_figure": false
+  "generationSource": "ai",
+  "profile": { "id": "target-uuid", "base_power": 9842 },
+  "scan_result": {
+    "scan_title": "Thunder Vanguard",
+    "equipment_bonus": 350,
+    "style_bonus": 120,
+    "pose_bonus": 80,
+    "current_power": 10392,
+    "detected_items": ["Katana", "Black coat"],
+    "current_status": "Combat ready"
   }
 }
 ```
 
----
-
-### Generate new target profile with temporary scan image
+#### Generate New Target
 
 `POST /v1/targets/generate`
 
-Content-Type:
-
-```text
-multipart/form-data
-```
-
-Fields:
+Content type: `multipart/form-data`
 
 ```text
 temporaryScanId: string
-faceEmbedding: number[]
-scanImage: file
+faceEmbedding: JSON-encoded number array
+scanMode: selfie | field
+scanImage: JPEG, PNG, or WebP; maximum 10 MB
 ```
 
-Response:
+Returns the new base `profile` and first `scan_result`. `generationSource` is
+`ai` when OpenAI is configured, otherwise `mock`.
 
-```json
-{
-  "status": "SUCCESS",
-  "message": "New target profile generated successfully.",
-  "targetId": "uuid-v4-new-generated-string",
-  "profile": {
-    "id": "uuid-v4-new-generated-string",
-    "codename": "Obsidian",
-    "battle_power": 9842,
-    "threat_level": "S",
-    "level": 87,
-    "str": 82,
-    "dex": 91,
-    "int": 35,
-    "luk": 99,
-    "description": "A highly agile target specializing in rapid movement and surprise attacks, frequently appearing in urban night zones.",
-    "is_public_figure": false
-  }
-}
-```
-
----
-
-### Update target profile
+#### Update Display Name
 
 `PATCH /v1/targets/{targetId}`
 
-Request body:
-
 ```json
-{
-  "profile": {
-    "codename": "Obsidian",
-    "battle_power": 9842,
-    "threat_level": "S",
-    "level": 87,
-    "str": 82,
-    "dex": 91,
-    "int": 35,
-    "luk": 99,
-    "description": "A highly agile target specializing in rapid movement and surprise attacks, frequently appearing in urban night zones.",
-    "is_public_figure": false
-  }
-}
+{ "displayName": "Joey", "scanMode": "selfie" }
 ```
 
-Response:
-
-```json
-{
-  "status": "SUCCESS",
-  "message": "Target profile updated successfully.",
-  "targetId": "uuid-v4-cool-string"
-}
-```
-
+Only an editable, non-public target can be renamed, and only from Selfie Mode.
+Field, public-figure, and admin rename attempts return `403`.
 
 ---
 
 ## 繁體中文
 
-賽博朋克（Cyberpunk）風格的人臉掃描器。可針對高風險實體資料庫進行即時檢測，並動態渲染出遊戲化的「威脅等級（Threat Levels）」、情境危險稱號以及安全風險屬性。
+BountyFace 是賽博龐克 RPG 掃描器。身份判斷以 iPhone 本機產生的 Face
+Embedding 為主；暫時掃描照片只用來分析當次 AI 稱號、可見裝備、服裝、姿勢與
+遊戲加成。
 
-### 1. 核心理念：隱私優先的暫時性影像處理
+### 目前實作
 
-在這場外勤任務中，你的行動裝置將化身為高級「賽博掃描器」。**BountyFace** 會直接在本地端設備提取 512 維的臉部特徵向量，並將其作為主要的身份比對依據。
+- React Native、Expo SDK 54、VisionCamera。
+- iPhone 本機執行 SE-MobileFaceNet TensorFlow Lite。
+- 產生 256 維、L2 Normalize 的 Face Embedding。
+- FastAPI 暫時使用記憶體資料；重啟後端會清除所有人物。
+- GPT-5.5 Vision + Structured Outputs 產生虛構 RPG 資料。
+- 尚未接資料庫；下一階段才會接 Supabase `pgvector`。
+- 原始掃描照片只在記憶體處理，不永久儲存。
 
-對於已存在的目標，系統只會將臉部特徵向量傳送至後端進行相似度搜尋。當偵測到新的目標時，系統可能會暫時上傳一張掃描照片至後端進行遊戲化屬性分析。影像僅於記憶體中處理，分析完成後立即丟棄，不會儲存在資料庫或任何永久儲存空間。
+### 資料分層
 
-### 2. 技術選型
+身份固定資料：
 
-* **前端端 (Frontend)：** React Native (Expo SDK 52 / Architecture 22) - 負責即時相機影格擷取（Frame Processing）、臉部偵測、人體/姿勢掃描與本地生物特徵權杖化（Tokenization）。
-* **雲端後端 (Backend)：** Python FastAPI (部署於 Google Cloud Run) - 輕量化業務邏輯層，負責身份比對、暫時性遊戲化分析與中繼路由。
-* **資料庫 (Database)：** Supabase (PostgreSQL) 啟用 `pgvector` 與 HNSW 索引 - 安全儲存並檢索數學特徵向量，提供毫秒級的比對速度。
+```text
+display_name
+base_power
+threat_level
+level
+STR / DEX / INT / LUK
+description
+is_public_figure
+is_name_editable
+最多八組 face embeddings
+```
 
-### 3. 架構邊界與約束 (Architecture Boundaries & Constraints)
+每次掃描重新計算：
 
-* **隱私優先的生物特徵處理：**
-  臉部特徵向量會在本地端設備產生，並作為主要的身份比對依據。對於已存在的目標，系統只會傳送 Embedding 至後端。當偵測到新目標時，系統可能會暫時上傳一張掃描照片進行遊戲化屬性分析。影像僅於記憶體中處理，分析完成後立即丟棄，不會儲存在資料庫或任何永久儲存空間。
+```text
+codename / scan_title
+equipment_bonus
+style_bonus
+pose_bonus
+current_power
+detected_items
+current_status
+```
 
-* **零永久影像儲存 (Zero Persistent Image Storage)：**
-  當偵測到新的目標時，系統可能會暫時上傳一張掃描照片至後端進行遊戲化分析。影像僅於記憶體中處理，分析完成後立即刪除，不會儲存在任何資料庫或永久儲存空間。最終僅保存臉部特徵向量（Embedding）及遊戲角色資料。
+```text
+current_power = base_power + equipment_bonus + style_bonus + pose_bonus
+```
 
-* **輕量化單實例架構 (Lightweight Single-Instance Architecture)：**
-  為了保持架構精實與成本效益，本專案刻意不採用繁重的分布式向量資料庫（如 Milvus、Qdrant）。取而代之的是，使用配備 HNSW 索引的單實例 PostgreSQL（透過 Supabase `pgvector`），這對於目前的遊戲資料量來說，已經能提供極其流暢且低於毫秒級的檢索效能。
+AI 只回傳裝備、服裝與姿勢的固定 tier；真正 bonus 由 FastAPI 的固定表格換算，
+避免模型每次自由產生不同加成。
 
-## 4. API Design
+### 身份比對規則
 
-### 傳送臉部特徵向量至伺服器
+每個人物最多保存八組 Face Embedding，比對時取所有 embedding 中最高的 cosine
+similarity：
+
+```text
+>= 0.75      Confirmed Match，直接使用原本基本資料
+0.45–0.75   Possible Match，使用者選 Confirm 或 Create New
+< 0.45       New Target，建立新角色
+```
+
+Confirm 後會把這次 embedding 加入該人物。高相似度 Confirmed Match 也會自動加入
+合格的新外觀版本。
+
+### 顯示名稱權限
+
+```text
+Selfie Mode：新人物 display_name="匿名"，只能在 Selfie Mode 修改
+Field Mode： 新人物 display_name="匿名目標"，掃描者不能修改
+Public/Admin：固定 display_name，永遠不能修改
+```
+
+`display_name` 是使用者／管理員擁有的固定名稱；`codename` 是 AI 依當次裝備與
+外觀重新產生的稱號。
+
+### API Design
+
+#### 健康狀態
+
+`GET /health`
+
+回傳 AI 是否設定、模型名稱與目前儲存模式。
+
+#### 比對 Face Embedding
 
 `POST /v1/scan`
 
-Request body:
-
 ```json
-{
-  "faceEmbedding": [0.0123, -0.4567, 0.8912]
-}
+{ "faceEmbedding": [0.0123, -0.4567, 0.8912] }
 ```
 
-如果資料庫中有相同或相似的臉部資訊：
+回傳 `matchStatus: confirmed | possible | new`、最高 `confidence`，以及需要時使用的
+`targetId`／`temporaryScanId`。
 
-```json
-{
-  "status": "SUCCESS",
-  "matchFound": true,
-  "targetId": "uuid-v4-cool-string",
-  "confidence": 0.92,
-  "message": "Target identified successfully."
-}
-```
-
-如果資料庫中沒有相同或相似的臉部資訊：
-
-```json
-{
-  "status": "SUCCESS",
-  "matchFound": false,
-  "temporaryScanId": "temp-uuid-v4-string",
-  "message": "New face detected. Please generate a profile."
-}
-```
-
----
-
-### 取得目標資料
+#### 取得基本資料
 
 `GET /v1/targets/{targetId}`
 
-Response:
+只取得該身份的 Base Profile，不重新分析照片。
+
+#### 確認 Possible Match
+
+`POST /v1/targets/{targetId}/confirm`
 
 ```json
-{
-  "status": "SUCCESS",
-  "profile": {
-    "id": "uuid-v4-cool-string",
-    "codename": "黑曜石",
-    "battle_power": 9842,
-    "threat_level": "S",
-    "level": 87,
-    "str": 82,
-    "dex": 91,
-    "int": 35,
-    "luk": 99,
-    "description": "敏捷型角色，擅長高速移動與突襲，經常出沒於城市夜間區域。",
-    "is_public_figure": false
-  }
-}
+{ "temporaryScanId": "temp-uuid" }
 ```
 
----
+將這次 embedding 加入既有人物，未來用多 embedding 的最高相似度比對。
 
-### 使用暫時掃描照片產生新目標資料
+#### 重新分析當次裝備
+
+`POST /v1/targets/{targetId}/analyze`
+
+使用 `multipart/form-data` 上傳 `scanImage`。Base Profile 不變，只更新 AI Codename、
+裝備／服裝／姿勢加成、可見物品、狀態與 Current Power。
+
+#### 建立新人物
 
 `POST /v1/targets/generate`
 
-Content-Type:
-
-```text
-multipart/form-data
-```
-
-Fields:
-
 ```text
 temporaryScanId: string
-faceEmbedding: number[]
-scanImage: file
+faceEmbedding: JSON number array
+scanMode: selfie | field
+scanImage: JPEG / PNG / WebP，最大 10 MB
 ```
 
-Response:
+回傳新 Base Profile 與第一次 Scan Result。
 
-```json
-{
-  "status": "SUCCESS",
-  "message": "New target profile generated successfully.",
-  "targetId": "uuid-v4-new-generated-string",
-  "profile": {
-    "id": "uuid-v4-new-generated-string",
-    "codename": "黑曜石",
-    "battle_power": 9842,
-    "threat_level": "S",
-    "level": 87,
-    "str": 82,
-    "dex": 91,
-    "int": 35,
-    "luk": 99,
-    "description": "敏捷型角色，擅長高速移動與突襲，經常出沒於城市夜間區域。",
-    "is_public_figure": false
-  }
-}
-```
-
----
-
-### 更新目標資料
+#### 修改 Display Name
 
 `PATCH /v1/targets/{targetId}`
 
-Request body:
-
 ```json
-{
-  "profile": {
-    "codename": "黑曜石",
-    "battle_power": 9842,
-    "threat_level": "S",
-    "level": 87,
-    "str": 82,
-    "dex": 91,
-    "int": 35,
-    "luk": 99,
-    "description": "敏捷型角色，擅長高速移動與突襲，經常出沒於城市夜間區域。",
-    "is_public_figure": false
-  }
-}
+{ "displayName": "Joey", "scanMode": "selfie" }
 ```
 
-Response:
+只允許 Selfie Mode 修改 `is_name_editable=true` 且非 Public Figure 的人物。Field、
+Public Figure 與 Admin 都會由後端回傳 `403`。
 
-```json
-{
-  "status": "SUCCESS",
-  "message": "Target profile updated successfully.",
-  "targetId": "uuid-v4-cool-string"
-}
+### 常見錯誤
+
+```text
+403  Display Name 不可修改
+404  Target 或 Temporary Scan 不存在
+409  Face Embedding 與 Temporary Scan 不一致
+413  Scan Image 超過 10 MB
+415  不支援的圖片格式
+422  缺少／無效欄位或照片品質流程未完成
+502  OpenAI RPG 分析失敗
 ```
+
+詳細啟動與測試方式請參考 [`server/README.md`](server/README.md)。

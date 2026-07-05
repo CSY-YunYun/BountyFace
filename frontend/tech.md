@@ -232,8 +232,24 @@ FastAPI 可以接收 embedding 並回傳是否找到
 POST /v1/scan
 GET /v1/targets/{targetId}
 POST /v1/targets/generate
-POST /v1/targets/save
+POST /v1/targets/{targetId}/analyze
 ```
+
+目前先使用記憶體 Backend，不實作資料庫寫入或 PATCH 更新。新人物會上傳
+scanImage，使用 OpenAI vision Structured Outputs 產生 RPG profile；未設定 API
+key 時保留 mock profile fallback。
+
+人物資料分成固定的 base profile，以及每張照片重新計算的 scan result。
+AI 只回傳裝備、服裝、姿勢 tier 與可見物品；加成與 current_power 由後端固定公式計算。
+
+Face match 使用多 embedding 的最高 cosine similarity：0.75 以上 confirmed，
+0.45 到 0.75 possible match，低於 0.45 建立新角色。possible match 可由使用者
+Confirm 並加入新的 face variant，或選 Create New 建立不同年齡／造型版本。
+臉部 crop 太暗、過曝或模糊時不送 API，要求重新掃描。
+基本戰力、Level、Threat、STR/DEX/INT/LUK 綁定身份；當前稱號、裝備、服裝、
+姿勢、物品與 current_power 每次掃描重新計算。
+display_name 與 AI codename 分離：Selfie 建立為「匿名」且只能在 Selfie Mode
+修改；Field 建立為「匿名目標」且不可修改；Public Figure / Admin 永遠不可修改。
 
 完成標準：
 

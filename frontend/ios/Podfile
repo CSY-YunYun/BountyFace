@@ -23,6 +23,7 @@ prepare_react_native_project!
 target 'BountyFaceApp' do
   use_expo_modules!
   pod 'MediaPipeTasksVision', '~> 0.10.14'
+  pod 'TensorFlowLiteSwift', '~> 2.17.0'
 
   if ENV['EXPO_USE_COMMUNITY_AUTOLINKING'] == '1'
     config_command = ['node', '-e', "process.argv=['', '', 'config'];require('@react-native-community/cli').run()"];
@@ -75,6 +76,9 @@ target 'BountyFaceApp' do
       config = File.read(xcconfig_path)
       config = config.gsub('-l"MediaPipeTasksCommon"', '-framework "MediaPipeTasksCommon"')
       config = config.gsub('-l"MediaPipeTasksVision"', '-framework "MediaPipeTasksVision"')
+      # MediaPipeTasksCommon already statically contains LiteRT. Keep the
+      # TensorFlowLiteSwift wrapper, but do not link a second C runtime.
+      config = config.gsub(' -framework "TensorFlowLiteC"', '')
       unless config.include?('MediaPipeTasksVision.xcframework/ios-arm64')
         config += "\nFRAMEWORK_SEARCH_PATHS = $(inherited) \"#{xcf_vision}/ios-arm64\" \"#{xcf_common}/ios-arm64\""
       end
