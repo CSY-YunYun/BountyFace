@@ -1,0 +1,97 @@
+require File.join(File.dirname(`node --print "require.resolve('expo/package.json')"`), "scripts/autolinking")
+require File.join(File.dirname(`node --print "require.resolve('react-native/package.json')"`), "scripts/react_native_pods")
+
+require 'json'
+podfile_properties = JSON.parse(File.read(File.join(__dir__, 'Podfile.properties.json'))) rescue {}
+
+def ccache_enabled?(podfile_properties)
+  # Environment variable takes precedence
+  return ENV['USE_CCACHE'] == '1' if ENV['USE_CCACHE']
+
+  # Fall back to Podfile properties
+  podfile_properties['apple.ccacheEnabled'] == 'true'
+end
+
+ENV['RCT_NEW_ARCH_ENABLED'] ||= '0' if podfile_properties['newArchEnabled'] == 'false'
+ENV['EX_DEV_CLIENT_NETWORK_INSPECTOR'] ||= podfile_properties['EX_DEV_CLIENT_NETWORK_INSPECTOR']
+ENV['RCT_USE_RN_DEP'] ||= '1' if podfile_properties['ios.buildReactNativeFromSource'] != 'true' && podfile_properties['newArchEnabled'] != 'false'
+ENV['RCT_USE_PREBUILT_RNCORE'] ||= '1' if podfile_properties['ios.buildReactNativeFromSource'] != 'true' && podfile_properties['newArchEnabled'] != 'false'
+platform :ios, podfile_properties['ios.deploymentTarget'] || '15.1'
+
+prepare_react_native_project!
+
+target 'BountyFaceApp' do
+  use_expo_modules!
+  pod 'MediaPipeTasksVision', '~> 0.10.14'
+  pod 'TensorFlowLiteSwift', '~> 2.17.0'
+
+  if ENV['EXPO_USE_COMMUNITY_AUTOLINKING'] == '1'
+    config_command = ['node', '-e', "process.argv=['', '', 'config'];require('@react-native-community/cli').run()"];
+  else
+    config_command = [
+      'node',
+      '--no-warnings',
+      '--eval',
+      'require(\'expo/bin/autolinking\')',
+      'expo-modules-autolinking',
+      'react-native-config',
+      '--json',
+      '--platform',
+      'ios'
+    ]
+  end
+
+  config = use_native_modules!(config_command)
+
+  use_frameworks! :linkage => podfile_properties['ios.useFrameworks'].to_sym if podfile_properties['ios.useFrameworks']
+  use_frameworks! :linkage => ENV['USE_FRAMEWORKS'].to_sym if ENV['USE_FRAMEWORKS']
+
+  use_react_native!(
+    :path => config[:reactNativePath],
+    :hermes_enabled => podfile_properties['expo.jsEngine'] == nil || podfile_properties['expo.jsEngine'] == 'hermes',
+    # An absolute path to your application root.
+    :app_path => "#{Pod::Config.instance.installation_root}/..",
+    :privacy_file_aggregation_enabled => podfile_properties['apple.privacyManifestAggregationEnabled'] != 'false',
+  )
+
+  post_install do |installer|
+    react_native_post_install(
+      installer,
+      config[:reactNativePath],
+      :mac_catalyst_enabled => false,
+      :ccache_enabled => ccache_enabled?(podfile_properties),
+    )
+
+    installer.pods_project.targets.each do |target|
+      target.build_configurations.each do |config|
+        config.build_settings['CLANG_CXX_LANGUAGE_STANDARD'] = 'c++20'
+        config.build_settings['CLANG_CXX_LIBRARY'] = 'libc++'
+      end
+    end
+
+    xcf_vision = '${PODS_ROOT}/MediaPipeTasksVision/frameworks/MediaPipeTasksVision.xcframework'
+    xcf_common = '${PODS_ROOT}/MediaPipeTasksCommon/frameworks/MediaPipeTasksCommon.xcframework'
+
+    Dir.glob(File.join(installer.sandbox.root, 'Target Support Files', 'Pods-BountyFaceApp', '*.xcconfig')).each do |xcconfig_path|
+      config = File.read(xcconfig_path)
+      config = config.gsub('-l"MediaPipeTasksCommon"', '-framework "MediaPipeTasksCommon"')
+      config = config.gsub('-l"MediaPipeTasksVision"', '-framework "MediaPipeTasksVision"')
+      # MediaPipeTasksCommon already statically contains LiteRT. Keep the
+      # TensorFlowLiteSwift wrapper, but do not link a second C runtime.
+      config = config.gsub(' -framework "TensorFlowLiteC"', '')
+      unless config.include?('MediaPipeTasksVision.xcframework/ios-arm64')
+        config += "\nFRAMEWORK_SEARCH_PATHS = $(inherited) \"#{xcf_vision}/ios-arm64\" \"#{xcf_common}/ios-arm64\""
+      end
+      File.write(xcconfig_path, config)
+    end
+
+    Dir.glob(File.join(installer.sandbox.root, 'Target Support Files', '**', '*.xcconfig')).each do |xcconfig_path|
+      contents = File.read(xcconfig_path)
+      patched = contents.gsub(
+        /CLANG_CXX_LANGUAGE_STANDARD = (?:"?(?:gnu\+\+14|gnu\+\+17|c\+\+14|c\+\+17)"?)/,
+        'CLANG_CXX_LANGUAGE_STANDARD = c++20'
+      )
+      File.write(xcconfig_path, patched) if patched != contents
+    end
+  end
+end
