@@ -57,7 +57,7 @@ type PossibleMatchCandidate = {
 type MockProfile = {
   id: string;
   displayName: string;
-  codename: string;
+  title: string;
   basePower: number;
   threatLevel: string;
   level: number;
@@ -223,7 +223,7 @@ function toUiProfile(profile: ApiTargetProfile): MockProfile {
   return {
     id: profile.id,
     displayName: profile.display_name,
-    codename: profile.codename,
+    title: profile.title,
     basePower: profile.base_power,
     threatLevel: profile.threat_level,
     level: profile.level,
@@ -1020,8 +1020,8 @@ export function CameraScreen() {
                     <Text style={styles.verifiedBadge}> ✓</Text>
                   )}
                 </Text>
-                <Text style={styles.possibleMatchFieldLabel}>CODENAME / 稱號</Text>
-                <Text style={styles.possibleMatchCodename}>{possibleMatch.profile.codename}</Text>
+                <Text style={styles.possibleMatchFieldLabel}>TITLE / 稱號</Text>
+                <Text style={styles.possibleMatchCodename}>{possibleMatch.profile.title}</Text>
                 <Text style={styles.possibleMatchConfidence}>
                   SIMILARITY {Math.round(possibleMatch.confidence * 100)}%
                 </Text>
@@ -1091,7 +1091,7 @@ export function CameraScreen() {
 
                 <View style={styles.profileHeader}>
                   <View>
-                    <Text style={styles.profileLabel}>CURRENT CODENAME / 當前稱號</Text>
+                    <Text style={styles.profileLabel}>CURRENT TITLE / 當前稱號</Text>
                     <Text style={styles.profileSource}>
                       {profileSource === 'ai'
                         ? 'AI GENERATED'
@@ -1100,7 +1100,7 @@ export function CameraScreen() {
                           : 'MOCK'}
                     </Text>
                     <Text style={styles.profileName}>
-                      {scanResult?.scan_title ?? mockProfile.codename}
+                      {scanResult?.current_title ?? mockProfile.title}
                     </Text>
                   </View>
                   <View style={styles.threatBadge}>

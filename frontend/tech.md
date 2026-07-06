@@ -274,7 +274,7 @@ App 可以成功打到 FastAPI
 targets
 - id
 - display_name
-- codename
+- title
 - threat_level
 - base_power
 - level

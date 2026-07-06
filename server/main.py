@@ -48,7 +48,7 @@ class UpdateDisplayNameRequest(BaseModel):
 class TargetProfile(BaseModel):
     id: str
     display_name: str
-    codename: str
+    title: str = ""
     base_power: int
     threat_level: str
     level: int
@@ -63,7 +63,6 @@ class TargetProfile(BaseModel):
 
 
 class GeneratedBaseProfile(BaseModel):
-    codename: builtins.str = Field(min_length=1, max_length=40)
     base_power: builtins.int = Field(ge=1, le=99999)
     threat_level: builtins.str = Field(pattern="^(D|C|B|A|S|SS)$")
     level: builtins.int = Field(ge=1, le=100)
@@ -89,7 +88,7 @@ class GeneratedTargetAnalysis(BaseModel):
 
 
 class ScanResult(BaseModel):
-    scan_title: str
+    current_title: str
     equipment_bonus: int
     style_bonus: int
     pose_bonus: int
@@ -242,7 +241,6 @@ def cosine_similarity(first: tuple[float, ...], second: tuple[float, ...]) -> fl
 
 def mock_generated_profile() -> GeneratedBaseProfile:
     return GeneratedBaseProfile(
-        codename="黑曜石",
         base_power=9842,
         threat_level="S",
         level=87,
@@ -270,7 +268,7 @@ def build_scan_result(profile: TargetProfile, analysis: VisualAnalysis) -> ScanR
     style_bonus = STYLE_BONUSES[analysis.style_tier]
     pose_bonus = POSE_BONUSES[analysis.pose_tier]
     return ScanResult(
-        scan_title=analysis.scan_title,
+        current_title=analysis.scan_title,
         equipment_bonus=equipment_bonus,
         style_bonus=style_bonus,
         pose_bonus=pose_bonus,
@@ -299,7 +297,7 @@ async def generate_target_from_image(image: bytes, media_type: str) -> Generated
                 "content": (
                     "You create fictional RPG character cards and classify current scan visuals. "
                     "Never identify the person or infer sensitive traits. Base the fictional card "
-                    "only on visible clothing, pose, carried objects, and scene. Return codename, "
+                    "only on visible clothing, pose, carried objects, and scene. Return "
                     "description, scan_title, and current_status in Traditional Chinese."
                 ),
             },
@@ -496,9 +494,6 @@ async def analyze_target(target_id: str, scan_image: Annotated[UploadFile, File(
     else:
         analysis = mock_visual_analysis()
 
-    profile.codename = analysis.scan_title
-    update_stored_profile(profile)
-
     return {
         "status": "SUCCESS",
         "generationSource": generation_source,
@@ -558,7 +553,6 @@ async def generate_target(
 
     target_id = str(uuid4())
     profile_data = generated_profile.model_dump()
-    profile_data["codename"] = analysis.scan_title
     profile = TargetProfile(
         id=target_id,
         display_name="匿名" if scan_mode == "selfie" else "匿名目標",

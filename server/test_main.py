@@ -50,7 +50,8 @@ def test_new_target_then_existing_target_flow(monkeypatch):
     assert generated.json()["generationSource"] == "mock"
     target_id = generated.json()["targetId"]
     assert generated.json()["profile"]["display_name"] == "匿名目標"
-    assert generated.json()["profile"]["codename"] == "黑曜石・當前型態"
+    assert generated.json()["profile"]["title"] == ""
+    assert generated.json()["scan_result"]["current_title"] == "黑曜石・當前型態"
 
     second_scan = client.post("/v1/scan", json={"faceEmbedding": MOCK_EMBEDDING})
     assert second_scan.status_code == 200
@@ -117,7 +118,6 @@ def test_generate_target_uses_scan_image(monkeypatch):
         assert media_type == "image/jpeg"
         return GeneratedTargetAnalysis(
             profile=GeneratedBaseProfile(
-                codename="夜行者",
                 base_power=7200,
                 threat_level="A",
                 level=64,
@@ -152,8 +152,9 @@ def test_generate_target_uses_scan_image(monkeypatch):
     assert generated.status_code == 200
     assert generated.json()["generationSource"] == "ai"
     assert generated.json()["profile"]["display_name"] == "匿名目標"
-    assert generated.json()["profile"]["codename"] == "夜行偵察型態"
+    assert generated.json()["profile"]["title"] == ""
     assert generated.json()["profile"]["base_power"] == 7200
+    assert generated.json()["scan_result"]["current_title"] == "夜行偵察型態"
     assert generated.json()["scan_result"]["equipment_bonus"] == 260
     assert generated.json()["scan_result"]["current_power"] == 7660
 

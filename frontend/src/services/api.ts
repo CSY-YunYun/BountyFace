@@ -3,7 +3,7 @@ const API_URL = process.env.EXPO_PUBLIC_API_URL ?? 'http://127.0.0.1:8000';
 export type ApiTargetProfile = {
   id: string;
   display_name: string;
-  codename: string;
+  title: string;
   base_power: number;
   threat_level: string;
   level: number;
@@ -18,7 +18,7 @@ export type ApiTargetProfile = {
 };
 
 export type ApiScanResult = {
-  scan_title: string;
+  current_title: string;
   equipment_bonus: number;
   style_bonus: number;
   pose_bonus: number;
