@@ -67,6 +67,7 @@ type MockProfile = {
   luk: number;
   description: string;
   isPublicFigure: boolean;
+  isVerified: boolean;
   isNameEditable: boolean;
 };
 
@@ -232,6 +233,7 @@ function toUiProfile(profile: ApiTargetProfile): MockProfile {
     luk: profile.luk,
     description: profile.description,
     isPublicFigure: profile.is_public_figure,
+    isVerified: profile.is_verified,
     isNameEditable: profile.is_name_editable,
   };
 }

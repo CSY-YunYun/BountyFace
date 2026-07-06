@@ -281,6 +281,7 @@ targets
 - str / dex / int / luk
 - description
 - is_public_figure
+- is_verified
 - is_name_editable
 - created_at
 - updated_at

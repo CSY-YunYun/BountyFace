@@ -58,6 +58,7 @@ class TargetProfile(BaseModel):
     luk: int
     description: str
     is_public_figure: bool = False
+    is_verified: bool = False
     is_name_editable: bool = False
 
 

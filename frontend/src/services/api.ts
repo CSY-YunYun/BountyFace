@@ -13,6 +13,7 @@ export type ApiTargetProfile = {
   luk: number;
   description: string;
   is_public_figure: boolean;
+  is_verified: boolean;
   is_name_editable: boolean;
 };
 
