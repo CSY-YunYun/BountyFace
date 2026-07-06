@@ -3,7 +3,7 @@ create extension if not exists vector with schema extensions;
 create table if not exists public.targets (
   id uuid primary key,
   display_name text not null check (char_length(display_name) between 1 and 40),
-  title text not null default '',
+  special_title text not null default '',
   base_power integer not null check (base_power between 1 and 99999),
   threat_level text not null check (threat_level in ('D', 'C', 'B', 'A', 'S', 'SS')),
   level integer not null check (level between 1 and 100),

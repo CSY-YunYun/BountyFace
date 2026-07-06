@@ -57,7 +57,7 @@ type PossibleMatchCandidate = {
 type MockProfile = {
   id: string;
   displayName: string;
-  title: string;
+  specialTitle: string;
   basePower: number;
   threatLevel: string;
   level: number;
@@ -223,7 +223,7 @@ function toUiProfile(profile: ApiTargetProfile): MockProfile {
   return {
     id: profile.id,
     displayName: profile.display_name,
-    title: profile.title,
+    specialTitle: profile.special_title,
     basePower: profile.base_power,
     threatLevel: profile.threat_level,
     level: profile.level,
@@ -1021,7 +1021,7 @@ export function CameraScreen() {
                   )}
                 </Text>
                 <Text style={styles.possibleMatchFieldLabel}>TITLE / 稱號</Text>
-                <Text style={styles.possibleMatchCodename}>{possibleMatch.profile.title}</Text>
+                <Text style={styles.possibleMatchCodename}>{possibleMatch.profile.special_title}</Text>
                 <Text style={styles.possibleMatchConfidence}>
                   SIMILARITY {Math.round(possibleMatch.confidence * 100)}%
                 </Text>
@@ -1100,7 +1100,7 @@ export function CameraScreen() {
                           : 'MOCK'}
                     </Text>
                     <Text style={styles.profileName}>
-                      {scanResult?.current_title ?? mockProfile.title}
+                      {scanResult?.current_title ?? mockProfile.specialTitle}
                     </Text>
                   </View>
                   <View style={styles.threatBadge}>

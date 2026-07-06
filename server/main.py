@@ -48,7 +48,7 @@ class UpdateDisplayNameRequest(BaseModel):
 class TargetProfile(BaseModel):
     id: str
     display_name: str
-    title: str = ""
+    special_title: str = ""
     base_power: int
     threat_level: str
     level: int

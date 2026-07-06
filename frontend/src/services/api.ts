@@ -3,7 +3,7 @@ const API_URL = process.env.EXPO_PUBLIC_API_URL ?? 'http://127.0.0.1:8000';
 export type ApiTargetProfile = {
   id: string;
   display_name: string;
-  title: string;
+  special_title: string;
   base_power: number;
   threat_level: string;
   level: number;
