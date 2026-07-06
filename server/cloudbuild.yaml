@@ -1,0 +1,15 @@
+steps:
+  - name: gcr.io/google.com/cloudsdktool/cloud-sdk
+    entrypoint: gcloud
+    args:
+      - run
+      - deploy
+      - ${_SERVICE}
+      - --source=./server
+      - --region=${_REGION}
+      - --allow-unauthenticated
+      - --max-instances=1
+
+substitutions:
+  _REGION: asia-east1
+  _SERVICE: bountyface-backend
