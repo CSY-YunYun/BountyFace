@@ -1014,7 +1014,12 @@ export function CameraScreen() {
               <View style={styles.possibleMatchPanel}>
                 <Text style={styles.possibleMatchLabel}>POSSIBLE MATCH</Text>
                 <Text style={styles.possibleMatchFieldLabel}>IDENTITY / 身分</Text>
-                <Text style={styles.possibleMatchName}>{possibleMatch.profile.display_name}?</Text>
+                <Text style={styles.possibleMatchName}>
+                  {possibleMatch.profile.display_name}?
+                  {possibleMatch.profile.is_verified && (
+                    <Text style={styles.verifiedBadge}> ✓</Text>
+                  )}
+                </Text>
                 <Text style={styles.possibleMatchFieldLabel}>CODENAME / 稱號</Text>
                 <Text style={styles.possibleMatchCodename}>{possibleMatch.profile.codename}</Text>
                 <Text style={styles.possibleMatchConfidence}>
@@ -1063,7 +1068,12 @@ export function CameraScreen() {
                 <View style={styles.identityRow}>
                   <View>
                     <Text style={styles.identityLabel}>DISPLAY NAME / 顯示名稱</Text>
-                    <Text style={styles.identityName}>{mockProfile.displayName}</Text>
+                    <Text style={styles.identityName}>
+                      {mockProfile.displayName}
+                      {mockProfile.isVerified && (
+                        <Text style={styles.verifiedBadge}> ✓</Text>
+                      )}
+                    </Text>
                   </View>
                   {scanMode === 'selfie'
                     && mockProfile.isNameEditable
@@ -1411,6 +1421,7 @@ const styles = StyleSheet.create({
   },
   identityLabel: { color: '#94a59e', fontSize: 8, fontWeight: '800' },
   identityName: { marginTop: 2, color: '#ffffff', fontSize: 18, fontWeight: '900' },
+  verifiedBadge: { color: '#7ef9c6', fontSize: 16, fontWeight: '900' },
   editNameButton: {
     minWidth: 54,
     height: 30,
