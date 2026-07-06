@@ -367,6 +367,7 @@ async def read_scan_image(scan_image: UploadFile) -> tuple[bytes, str]:
     return image, media_type
 
 
+@app.get("/")
 @app.get("/health")
 def health_check():
     return {
