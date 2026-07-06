@@ -1089,6 +1089,13 @@ export function CameraScreen() {
                   )}
                 </View>
 
+                {mockProfile.specialTitle !== '' && (
+                  <View style={styles.specialTitleRow}>
+                    <Text style={styles.identityLabel}>SPECIAL TITLE / 特殊稱號</Text>
+                    <Text style={styles.specialTitleText}>{mockProfile.specialTitle}</Text>
+                  </View>
+                )}
+
                 <View style={styles.profileHeader}>
                   <View>
                     <Text style={styles.profileLabel}>CURRENT TITLE / 當前稱號</Text>
@@ -1422,6 +1429,8 @@ const styles = StyleSheet.create({
   identityLabel: { color: '#94a59e', fontSize: 8, fontWeight: '800' },
   identityName: { marginTop: 2, color: '#ffffff', fontSize: 18, fontWeight: '900' },
   verifiedBadge: { color: '#7ef9c6', fontSize: 16, fontWeight: '900' },
+  specialTitleRow: { marginTop: 10 },
+  specialTitleText: { marginTop: 2, color: '#7ef9c6', fontSize: 14, fontWeight: '800' },
   editNameButton: {
     minWidth: 54,
     height: 30,
