@@ -11,7 +11,6 @@ create table if not exists public.targets (
   dex integer not null check (dex between 1 and 100),
   int integer not null check (int between 1 and 100),
   luk integer not null check (luk between 1 and 100),
-  description text not null check (char_length(description) between 1 and 240),
   is_public_figure boolean not null default false,
   is_verified boolean not null default false,
   is_name_editable boolean not null default false,

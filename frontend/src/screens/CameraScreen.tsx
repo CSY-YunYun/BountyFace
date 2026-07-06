@@ -65,7 +65,6 @@ type MockProfile = {
   dex: number;
   int: number;
   luk: number;
-  description: string;
   isPublicFigure: boolean;
   isVerified: boolean;
   isNameEditable: boolean;
@@ -231,7 +230,6 @@ function toUiProfile(profile: ApiTargetProfile): MockProfile {
     dex: profile.dex,
     int: profile.int,
     luk: profile.luk,
-    description: profile.description,
     isPublicFigure: profile.is_public_figure,
     isVerified: profile.is_verified,
     isNameEditable: profile.is_name_editable,
@@ -1150,6 +1148,9 @@ export function CameraScreen() {
                       </Text>
                     </View>
                     <Text style={styles.scanStatus}>{scanResult.current_status}</Text>
+                    <Text style={styles.scanDescription}>
+                      {scanResult.current_description}
+                    </Text>
                     {scanResult.detected_items.length > 0 && (
                       <Text style={styles.detectedItems}>
                         ITEMS · {scanResult.detected_items.join(' · ')}
@@ -1541,6 +1542,7 @@ const styles = StyleSheet.create({
   currentPowerLabel: { color: '#f0c85a', fontSize: 8, fontWeight: '900' },
   currentPowerValue: { color: '#ffffff', fontSize: 24, fontWeight: '900', fontVariant: ['tabular-nums'] },
   scanStatus: { marginTop: 5, color: '#7ef9c6', fontSize: 10, fontWeight: '800' },
+  scanDescription: { marginTop: 6, color: '#aebbb6', fontSize: 10, lineHeight: 16 },
   detectedItems: { marginTop: 3, color: '#94a59e', fontSize: 8, fontWeight: '700' },
   rescanButton: {
     height: 34,

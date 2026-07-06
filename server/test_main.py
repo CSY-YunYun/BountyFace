@@ -125,7 +125,6 @@ def test_generate_target_uses_scan_image(monkeypatch):
                 dex=88,
                 int=72,
                 luk=55,
-                description="擅長快速偵察的敏捷型角色。",
             ),
             scan=VisualAnalysis(
                 scan_title="夜行偵察型態",
@@ -133,6 +132,7 @@ def test_generate_target_uses_scan_image(monkeypatch):
                 style_tier="distinctive",
                 pose_tier="dynamic",
                 detected_items=["Long coat"],
+                description="擅長快速偵察的敏捷型角色。",
                 current_status="偵察中",
             ),
         )
@@ -155,6 +155,7 @@ def test_generate_target_uses_scan_image(monkeypatch):
     assert generated.json()["profile"]["special_title"] == ""
     assert generated.json()["profile"]["base_power"] == 7200
     assert generated.json()["scan_result"]["current_title"] == "夜行偵察型態"
+    assert generated.json()["scan_result"]["current_description"] == "擅長快速偵察的敏捷型角色。"
     assert generated.json()["scan_result"]["equipment_bonus"] == 260
     assert generated.json()["scan_result"]["current_power"] == 7660
 

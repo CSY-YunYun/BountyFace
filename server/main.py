@@ -56,7 +56,6 @@ class TargetProfile(BaseModel):
     dex: int
     int: int
     luk: int
-    description: str
     is_public_figure: bool = False
     is_verified: bool = False
     is_name_editable: bool = False
@@ -70,7 +69,6 @@ class GeneratedBaseProfile(BaseModel):
     dex: builtins.int = Field(ge=1, le=100)
     int: builtins.int = Field(ge=1, le=100)
     luk: builtins.int = Field(ge=1, le=100)
-    description: builtins.str = Field(min_length=1, max_length=240)
 
 
 class VisualAnalysis(BaseModel):
@@ -79,6 +77,7 @@ class VisualAnalysis(BaseModel):
     style_tier: Literal["plain", "coordinated", "distinctive", "iconic"]
     pose_tier: Literal["neutral", "ready", "dynamic", "dominant"]
     detected_items: list[builtins.str] = Field(max_length=8)
+    description: builtins.str = Field(min_length=1, max_length=240)
     current_status: builtins.str = Field(min_length=1, max_length=80)
 
 
@@ -94,6 +93,7 @@ class ScanResult(BaseModel):
     pose_bonus: int
     current_power: int
     detected_items: list[str]
+    current_description: str
     current_status: str
 
 
@@ -248,7 +248,6 @@ def mock_generated_profile() -> GeneratedBaseProfile:
         dex=91,
         int=35,
         luk=99,
-        description="敏捷型角色，擅長高速移動與突襲，經常出沒於城市夜間區域。",
     )
 
 
@@ -259,6 +258,7 @@ def mock_visual_analysis() -> VisualAnalysis:
         style_tier="distinctive",
         pose_tier="dynamic",
         detected_items=["Black coat"],
+        description="敏捷型角色，擅長高速移動與突襲，經常出沒於城市夜間區域。",
         current_status="Combat ready",
     )
 
@@ -274,6 +274,7 @@ def build_scan_result(profile: TargetProfile, analysis: VisualAnalysis) -> ScanR
         pose_bonus=pose_bonus,
         current_power=profile.base_power + equipment_bonus + style_bonus + pose_bonus,
         detected_items=analysis.detected_items,
+        current_description=analysis.description,
         current_status=analysis.current_status,
     )
 
@@ -298,7 +299,7 @@ async def generate_target_from_image(image: bytes, media_type: str) -> Generated
                     "You create fictional RPG character cards and classify current scan visuals. "
                     "Never identify the person or infer sensitive traits. Base the fictional card "
                     "only on visible clothing, pose, carried objects, and scene. Return "
-                    "description, scan_title, and current_status in Traditional Chinese."
+                    "scan_title, and current_status in Traditional Chinese."
                 ),
             },
             {
@@ -332,8 +333,9 @@ async def analyze_scan_image(image: bytes, media_type: str) -> VisualAnalysis:
                 "content": (
                     "Classify only visible equipment, clothing style, pose, and carried objects for "
                     "a fictional RPG scan. Never identify the person or infer sensitive traits. "
-                    "Use only the provided tier enum values. Return scan_title and current_status "
-                    "in Traditional Chinese. The scan title should reflect the current equipment and style."
+                    "Use only the provided tier enum values. Return scan_title, description, and "
+                    "current_status in Traditional Chinese. The description should reflect the "
+                    "current visible appearance, clothing, and pose."
                 ),
             },
             {

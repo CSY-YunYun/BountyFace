@@ -11,7 +11,6 @@ export type ApiTargetProfile = {
   dex: number;
   int: number;
   luk: number;
-  description: string;
   is_public_figure: boolean;
   is_verified: boolean;
   is_name_editable: boolean;
@@ -24,6 +23,7 @@ export type ApiScanResult = {
   pose_bonus: number;
   current_power: number;
   detected_items: string[];
+  current_description: string;
   current_status: string;
 };
 
