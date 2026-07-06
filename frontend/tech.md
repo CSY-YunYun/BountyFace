@@ -235,9 +235,10 @@ POST /v1/targets/generate
 POST /v1/targets/{targetId}/analyze
 ```
 
-目前先使用記憶體 Backend，不實作資料庫寫入或 PATCH 更新。新人物會上傳
-scanImage，使用 OpenAI vision Structured Outputs 產生 RPG profile；未設定 API
-key 時保留 mock profile fallback。
+Backend 支援兩種儲存模式：未設定 Supabase 時使用記憶體供本機測試；設定
+Supabase 後使用 PostgreSQL + pgvector 永久保存。新人物會上傳 scanImage，使用
+OpenAI vision Structured Outputs 產生 RPG profile；未設定 API key 時保留 mock
+profile fallback。
 
 人物資料分成固定的 base profile，以及每張照片重新計算的 scan result。
 AI 只回傳裝備、服裝、姿勢 tier 與可見物品；加成與 current_power 由後端固定公式計算。
@@ -272,24 +273,33 @@ App 可以成功打到 FastAPI
 ```text
 targets
 - id
+- display_name
 - codename
 - threat_level
-- power_level
-- net_worth
-- hacking
-- stealth
+- base_power
+- level
+- str / dex / int / luk
 - description
-- face_embedding
 - is_public_figure
+- is_name_editable
 - created_at
 - updated_at
+
+target_embeddings
+- id
+- target_id
+- embedding vector(256)
+- source
+- quality_score
+- created_at
 ```
 
 需要索引：
 
 ```text
 pgvector
-HNSW index
+cosine HNSW index
+match_target_embeddings RPC
 ```
 
 完成標準：

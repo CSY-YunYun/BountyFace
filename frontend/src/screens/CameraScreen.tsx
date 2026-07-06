@@ -1011,7 +1011,10 @@ export function CameraScreen() {
             {possibleMatch && (
               <View style={styles.possibleMatchPanel}>
                 <Text style={styles.possibleMatchLabel}>POSSIBLE MATCH</Text>
-                <Text style={styles.possibleMatchName}>{possibleMatch.profile.codename}?</Text>
+                <Text style={styles.possibleMatchFieldLabel}>IDENTITY / 身分</Text>
+                <Text style={styles.possibleMatchName}>{possibleMatch.profile.display_name}?</Text>
+                <Text style={styles.possibleMatchFieldLabel}>CODENAME / 稱號</Text>
+                <Text style={styles.possibleMatchCodename}>{possibleMatch.profile.codename}</Text>
                 <Text style={styles.possibleMatchConfidence}>
                   SIMILARITY {Math.round(possibleMatch.confidence * 100)}%
                 </Text>
@@ -1364,8 +1367,10 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(240, 200, 90, 0.1)',
   },
   possibleMatchLabel: { color: '#f0c85a', fontSize: 9, fontWeight: '900' },
-  possibleMatchName: { marginTop: 4, color: '#ffffff', fontSize: 20, fontWeight: '900' },
-  possibleMatchConfidence: { marginTop: 3, color: '#aebbb6', fontSize: 9, fontWeight: '700' },
+  possibleMatchFieldLabel: { marginTop: 8, color: '#94a59e', fontSize: 8, fontWeight: '800' },
+  possibleMatchName: { marginTop: 2, color: '#ffffff', fontSize: 20, fontWeight: '900' },
+  possibleMatchCodename: { marginTop: 2, color: '#7ef9c6', fontSize: 14, fontWeight: '800' },
+  possibleMatchConfidence: { marginTop: 8, color: '#aebbb6', fontSize: 9, fontWeight: '700' },
   possibleMatchActions: { flexDirection: 'row', gap: 8, marginTop: 10 },
   matchAction: { flex: 1, height: 38, alignItems: 'center', justifyContent: 'center' },
   matchActionConfirm: { backgroundColor: '#7ef9c6' },

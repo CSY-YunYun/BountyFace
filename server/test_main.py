@@ -1,3 +1,7 @@
+import json
+import os
+
+os.environ["STORAGE_BACKEND"] = "memory"
 import main
 from fastapi.testclient import TestClient
 
@@ -12,7 +16,14 @@ from main import (
 
 
 client = TestClient(app)
-MOCK_EMBEDDING = [0.0123, -0.4567, 0.8912]
+
+
+def face_embedding(*values: float) -> list[float]:
+    return [*values, *([0.0] * (256 - len(values)))]
+
+
+MOCK_EMBEDDING = face_embedding(0.0123, -0.4567, 0.8912)
+MOCK_EMBEDDING_JSON = json.dumps(MOCK_EMBEDDING)
 
 
 def setup_function():
@@ -31,7 +42,7 @@ def test_new_target_then_existing_target_flow(monkeypatch):
         "/v1/targets/generate",
         data={
             "temporaryScanId": temporary_scan_id,
-            "faceEmbedding": "[0.0123, -0.4567, 0.8912]",
+            "faceEmbedding": MOCK_EMBEDDING_JSON,
             "scanMode": "field",
         },
     )
@@ -53,7 +64,7 @@ def test_new_target_then_existing_target_flow(monkeypatch):
 
     similar_scan = client.post(
         "/v1/scan",
-        json={"faceEmbedding": [0.013, -0.45, 0.89]},
+        json={"faceEmbedding": face_embedding(0.013, -0.45, 0.89)},
     )
     assert similar_scan.status_code == 200
     assert similar_scan.json()["matchFound"] is True
@@ -61,18 +72,20 @@ def test_new_target_then_existing_target_flow(monkeypatch):
 
 def test_possible_match_confirmation_adds_face_variant(monkeypatch):
     monkeypatch.delenv("OPENAI_API_KEY", raising=False)
-    first_scan = client.post("/v1/scan", json={"faceEmbedding": [1.0, 0.0]})
+    first_embedding = face_embedding(1.0, 0.0)
+    possible_embedding = face_embedding(0.6, 0.8)
+    first_scan = client.post("/v1/scan", json={"faceEmbedding": first_embedding})
     generated = client.post(
         "/v1/targets/generate",
         data={
             "temporaryScanId": first_scan.json()["temporaryScanId"],
-            "faceEmbedding": "[1.0, 0.0]",
+            "faceEmbedding": json.dumps(first_embedding),
             "scanMode": "field",
         },
     )
     target_id = generated.json()["targetId"]
 
-    possible = client.post("/v1/scan", json={"faceEmbedding": [0.6, 0.8]})
+    possible = client.post("/v1/scan", json={"faceEmbedding": possible_embedding})
     assert possible.json()["matchStatus"] == "possible"
     assert possible.json()["targetId"] == target_id
 
@@ -83,13 +96,18 @@ def test_possible_match_confirmation_adds_face_variant(monkeypatch):
     assert confirmed.status_code == 200
     assert confirmed.json()["embeddingCount"] == 2
 
-    rescanned = client.post("/v1/scan", json={"faceEmbedding": [0.6, 0.8]})
+    rescanned = client.post("/v1/scan", json={"faceEmbedding": possible_embedding})
     assert rescanned.json()["matchStatus"] == "confirmed"
 
 
 def test_unknown_target_returns_404():
     response = client.get("/v1/targets/missing")
     assert response.status_code == 404
+
+
+def test_scan_rejects_embedding_with_wrong_dimension():
+    response = client.post("/v1/scan", json={"faceEmbedding": [1.0, 0.0]})
+    assert response.status_code == 422
 
 
 def test_generate_target_uses_scan_image(monkeypatch):
@@ -125,7 +143,7 @@ def test_generate_target_uses_scan_image(monkeypatch):
         "/v1/targets/generate",
         data={
             "temporaryScanId": scan.json()["temporaryScanId"],
-            "faceEmbedding": "[0.0123, -0.4567, 0.8912]",
+            "faceEmbedding": MOCK_EMBEDDING_JSON,
             "scanMode": "field",
         },
         files={"scanImage": ("scan.jpg", b"fake-jpeg", "image/jpeg")},
@@ -147,7 +165,7 @@ def test_existing_target_keeps_base_profile_and_recalculates_scan(monkeypatch):
         "/v1/targets/generate",
         data={
             "temporaryScanId": scan.json()["temporaryScanId"],
-            "faceEmbedding": "[0.0123, -0.4567, 0.8912]",
+            "faceEmbedding": MOCK_EMBEDDING_JSON,
             "scanMode": "field",
         },
     )
@@ -170,7 +188,7 @@ def test_ai_generation_requires_scan_image(monkeypatch):
         "/v1/targets/generate",
         data={
             "temporaryScanId": scan.json()["temporaryScanId"],
-            "faceEmbedding": "[0.0123, -0.4567, 0.8912]",
+            "faceEmbedding": MOCK_EMBEDDING_JSON,
             "scanMode": "field",
         },
     )
@@ -186,7 +204,7 @@ def test_selfie_display_name_is_editable(monkeypatch):
         "/v1/targets/generate",
         data={
             "temporaryScanId": scan.json()["temporaryScanId"],
-            "faceEmbedding": "[0.0123, -0.4567, 0.8912]",
+            "faceEmbedding": MOCK_EMBEDDING_JSON,
             "scanMode": "selfie",
         },
     )
@@ -209,7 +227,7 @@ def test_field_display_name_is_not_editable(monkeypatch):
         "/v1/targets/generate",
         data={
             "temporaryScanId": scan.json()["temporaryScanId"],
-            "faceEmbedding": "[0.0123, -0.4567, 0.8912]",
+            "faceEmbedding": MOCK_EMBEDDING_JSON,
             "scanMode": "field",
         },
     )
@@ -231,7 +249,7 @@ def test_public_figure_display_name_is_never_editable(monkeypatch):
         "/v1/targets/generate",
         data={
             "temporaryScanId": scan.json()["temporaryScanId"],
-            "faceEmbedding": "[0.0123, -0.4567, 0.8912]",
+            "faceEmbedding": MOCK_EMBEDDING_JSON,
             "scanMode": "selfie",
         },
     )

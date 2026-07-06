@@ -23,10 +23,13 @@ codename, visible equipment, style, pose, and gameplay bonuses.
 - React Native with Expo SDK 54 and VisionCamera.
 - SE-MobileFaceNet TensorFlow Lite inference on iPhone.
 - 256-dimensional, L2-normalized face embeddings.
-- FastAPI with in-memory targets. Restarting the server clears all targets.
+- FastAPI with switchable memory or Supabase PostgreSQL + pgvector storage.
 - GPT-5.5 vision with Structured Outputs for fictional RPG analysis.
-- No database yet. Supabase `pgvector` is the next persistence stage.
+- Supabase stores persistent base profiles and up to eight embeddings per target.
 - Raw scan images are processed in memory and are not stored.
+
+Run `npx --yes supabase start` to launch the local database and open Supabase
+Studio at `http://127.0.0.1:54323`. See [`supabase/README.md`](supabase/README.md).
 
 ### Data Model
 
@@ -108,7 +111,8 @@ with the current equipment and appearance.
   "status": "ok",
   "aiConfigured": true,
   "profileModel": "gpt-5.5",
-  "storage": "memory"
+  "storage": "supabase",
+  "embeddingDimension": 256
 }
 ```
 
@@ -247,10 +251,14 @@ Embedding 為主；暫時掃描照片只用來分析當次 AI 稱號、可見裝
 - React Native、Expo SDK 54、VisionCamera。
 - iPhone 本機執行 SE-MobileFaceNet TensorFlow Lite。
 - 產生 256 維、L2 Normalize 的 Face Embedding。
-- FastAPI 暫時使用記憶體資料；重啟後端會清除所有人物。
+- FastAPI 支援 memory 測試模式與 Supabase PostgreSQL + pgvector 永久儲存。
 - GPT-5.5 Vision + Structured Outputs 產生虛構 RPG 資料。
-- 尚未接資料庫；下一階段才會接 Supabase `pgvector`。
+- Supabase 保存人物基本資料，以及每人最多八組 Face Embedding。
 - 原始掃描照片只在記憶體處理，不永久儲存。
+
+執行 `npx --yes supabase start` 可啟動本機資料庫，並在
+`http://127.0.0.1:54323` 開啟 Supabase Studio。詳細步驟請看
+[`supabase/README.md`](supabase/README.md)。
 
 ### 資料分層
 

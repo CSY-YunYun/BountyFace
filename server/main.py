@@ -6,7 +6,7 @@ import math
 import os
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Annotated, Literal
+from typing import Annotated, Any, Literal
 from uuid import uuid4
 
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile
@@ -15,15 +15,21 @@ from openai import AsyncOpenAI
 from pydantic import BaseModel, ConfigDict, Field
 from dotenv import load_dotenv
 
+try:
+    from supabase import Client, create_client
+except ImportError:  # The memory backend remains available without Supabase extras.
+    Client = None
+    create_client = None
 
-load_dotenv(Path(__file__).with_name(".env"), override=True)
+
+load_dotenv(Path(__file__).with_name(".env"), override=False)
 logger = logging.getLogger("uvicorn.error")
 
 
 class ScanRequest(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
 
-    face_embedding: list[float] = Field(alias="faceEmbedding", min_length=1)
+    face_embedding: list[float] = Field(alias="faceEmbedding", min_length=256, max_length=256)
 
 
 class ConfirmMatchRequest(BaseModel):
@@ -108,6 +114,7 @@ app.add_middleware(
 
 targets: dict[str, StoredTarget] = {}
 pending_scans: dict[str, tuple[float, ...]] = {}
+EMBEDDING_DIMENSION = 256
 CONFIRMED_MATCH_THRESHOLD = 0.75
 POSSIBLE_MATCH_THRESHOLD = 0.45
 MAX_EMBEDDINGS_PER_TARGET = 8
@@ -117,10 +124,109 @@ SUPPORTED_IMAGE_TYPES = {"image/jpeg", "image/png", "image/webp"}
 EQUIPMENT_BONUSES = {"none": 0, "basic": 120, "advanced": 260, "elite": 400}
 STYLE_BONUSES = {"plain": 0, "coordinated": 60, "distinctive": 120, "iconic": 200}
 POSE_BONUSES = {"neutral": 0, "ready": 40, "dynamic": 80, "dominant": 140}
+SUPABASE_URL = os.getenv("SUPABASE_URL", "").strip()
+SUPABASE_SERVICE_ROLE_KEY = os.getenv("SUPABASE_SERVICE_ROLE_KEY", "").strip()
+STORAGE_BACKEND = os.getenv("STORAGE_BACKEND", "memory").strip().lower()
+
+if STORAGE_BACKEND not in {"memory", "supabase"}:
+    raise RuntimeError("STORAGE_BACKEND must be either 'memory' or 'supabase'.")
+if STORAGE_BACKEND == "supabase" and not (SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY):
+    raise RuntimeError("Supabase storage requires SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY.")
+if STORAGE_BACKEND == "supabase" and create_client is None:
+    raise RuntimeError("Install server requirements before enabling Supabase storage.")
+
+supabase: Any = (
+    create_client(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY)
+    if STORAGE_BACKEND == "supabase" and create_client is not None
+    else None
+)
 
 
 def embedding_key(embedding: list[float]) -> tuple[float, ...]:
     return tuple(round(value, 6) for value in embedding)
+
+
+def storage_name() -> str:
+    return "supabase" if supabase is not None else "memory"
+
+
+def get_stored_profile(target_id: str) -> TargetProfile | None:
+    if supabase is None:
+        target = targets.get(target_id)
+        return target.profile if target else None
+
+    response = supabase.table("targets").select("*").eq("id", target_id).limit(1).execute()
+    if not response.data:
+        return None
+    return TargetProfile.model_validate(response.data[0])
+
+
+def find_best_embedding_match(key: tuple[float, ...]) -> tuple[float, str] | None:
+    if supabase is None:
+        matches = [
+            (
+                max(cosine_similarity(key, stored_embedding) for stored_embedding in target.embedding_keys),
+                target_id,
+            )
+            for target_id, target in targets.items()
+            if target.embedding_keys
+        ]
+        return max(matches) if matches else None
+
+    response = supabase.rpc(
+        "match_target_embeddings",
+        {"query_embedding": list(key), "match_count": 1},
+    ).execute()
+    if not response.data:
+        return None
+    match = response.data[0]
+    return float(match["similarity"]), str(match["target_id"])
+
+
+def add_stored_embedding(
+    target_id: str,
+    key: tuple[float, ...],
+    source: str,
+    quality_score: float = 1.0,
+) -> int:
+    if supabase is None:
+        target = targets.get(target_id)
+        if target is None:
+            raise KeyError(target_id)
+        target.embedding_keys.append(key)
+        target.embedding_keys = target.embedding_keys[-MAX_EMBEDDINGS_PER_TARGET:]
+        return len(target.embedding_keys)
+
+    response = supabase.rpc(
+        "add_target_embedding",
+        {
+            "p_target_id": target_id,
+            "p_embedding": list(key),
+            "p_source": source,
+            "p_quality_score": quality_score,
+        },
+    ).execute()
+    result = response.data[0] if isinstance(response.data, list) else response.data
+    return int(result)
+
+
+def create_stored_target(profile: TargetProfile, key: tuple[float, ...], source: str) -> None:
+    if supabase is None:
+        targets[profile.id] = StoredTarget(embedding_keys=[key], profile=profile)
+        return
+
+    supabase.table("targets").insert(profile.model_dump()).execute()
+    try:
+        add_stored_embedding(profile.id, key, source)
+    except Exception:
+        supabase.table("targets").delete().eq("id", profile.id).execute()
+        raise
+
+
+def update_stored_profile(profile: TargetProfile) -> None:
+    if supabase is None:
+        return
+    supabase.table("targets").update(profile.model_dump(exclude={"id"})).eq("id", profile.id).execute()
 
 
 def cosine_similarity(first: tuple[float, ...], second: tuple[float, ...]) -> float:
@@ -266,23 +372,18 @@ def health_check():
         "status": "ok",
         "aiConfigured": bool(os.getenv("OPENAI_API_KEY")),
         "profileModel": OPENAI_MODEL,
-        "storage": "memory",
+        "storage": storage_name(),
+        "embeddingDimension": EMBEDDING_DIMENSION,
     }
 
 
 @app.post("/v1/scan")
 def scan_target(request: ScanRequest):
     key = embedding_key(request.face_embedding)
-    matches = [
-        (
-            max(cosine_similarity(key, stored_embedding) for stored_embedding in target.embedding_keys),
-            target_id,
-        )
-        for target_id, target in targets.items()
-    ]
     best_confidence = 0.0
-    if matches:
-        confidence, target_id = max(matches)
+    best_match = find_best_embedding_match(key)
+    if best_match:
+        confidence, target_id = best_match
         best_confidence = confidence
         logger.info(
             "Face match candidate target=%s confidence=%.4f threshold=%.2f",
@@ -291,10 +392,8 @@ def scan_target(request: ScanRequest):
             CONFIRMED_MATCH_THRESHOLD,
         )
         if confidence >= CONFIRMED_MATCH_THRESHOLD:
-            target = targets[target_id]
             if confidence < 0.995:
-                target.embedding_keys.append(key)
-                target.embedding_keys = target.embedding_keys[-MAX_EMBEDDINGS_PER_TARGET:]
+                add_stored_embedding(target_id, key, "confirmed_match")
             return {
                 "status": "SUCCESS",
                 "matchStatus": "confirmed",
@@ -331,51 +430,51 @@ def scan_target(request: ScanRequest):
 
 @app.get("/v1/targets/{target_id}")
 def get_target(target_id: str):
-    target = targets.get(target_id)
-    if not target:
+    profile = get_stored_profile(target_id)
+    if profile is None:
         raise HTTPException(status_code=404, detail="Target not found.")
-    return {"status": "SUCCESS", "profile": target.profile}
+    return {"status": "SUCCESS", "profile": profile}
 
 
 @app.patch("/v1/targets/{target_id}")
 def update_target_display_name(target_id: str, request: UpdateDisplayNameRequest):
-    target = targets.get(target_id)
-    if not target:
+    profile = get_stored_profile(target_id)
+    if profile is None:
         raise HTTPException(status_code=404, detail="Target not found.")
     if request.scan_mode != "selfie":
         raise HTTPException(status_code=403, detail="Display name can only be changed in Selfie Mode.")
-    if target.profile.is_public_figure or not target.profile.is_name_editable:
+    if profile.is_public_figure or not profile.is_name_editable:
         raise HTTPException(status_code=403, detail="Display name is not editable for this target.")
 
     display_name = request.display_name.strip()
     if not display_name:
         raise HTTPException(status_code=422, detail="Display name cannot be empty.")
-    target.profile.display_name = display_name
-    return {"status": "SUCCESS", "profile": target.profile}
+    profile.display_name = display_name
+    update_stored_profile(profile)
+    return {"status": "SUCCESS", "profile": profile}
 
 
 @app.post("/v1/targets/{target_id}/confirm")
 def confirm_target_match(target_id: str, request: ConfirmMatchRequest):
-    target = targets.get(target_id)
-    if not target:
+    profile = get_stored_profile(target_id)
+    if profile is None:
         raise HTTPException(status_code=404, detail="Target not found.")
     pending_key = pending_scans.pop(request.temporary_scan_id, None)
     if pending_key is None:
         raise HTTPException(status_code=404, detail="Temporary scan not found.")
-    target.embedding_keys.append(pending_key)
-    target.embedding_keys = target.embedding_keys[-MAX_EMBEDDINGS_PER_TARGET:]
+    embedding_count = add_stored_embedding(target_id, pending_key, "user_confirmed")
     return {
         "status": "SUCCESS",
         "message": "Face variant added to target.",
-        "profile": target.profile,
-        "embeddingCount": len(target.embedding_keys),
+        "profile": profile,
+        "embeddingCount": embedding_count,
     }
 
 
 @app.post("/v1/targets/{target_id}/analyze")
 async def analyze_target(target_id: str, scan_image: Annotated[UploadFile, File(alias="scanImage")]):
-    target = targets.get(target_id)
-    if not target:
+    profile = get_stored_profile(target_id)
+    if profile is None:
         raise HTTPException(status_code=404, detail="Target not found.")
 
     image, media_type = await read_scan_image(scan_image)
@@ -396,13 +495,14 @@ async def analyze_target(target_id: str, scan_image: Annotated[UploadFile, File(
     else:
         analysis = mock_visual_analysis()
 
-    target.profile.codename = analysis.scan_title
+    profile.codename = analysis.scan_title
+    update_stored_profile(profile)
 
     return {
         "status": "SUCCESS",
         "generationSource": generation_source,
-        "profile": target.profile,
-        "scan_result": build_scan_result(target.profile, analysis),
+        "profile": profile,
+        "scan_result": build_scan_result(profile, analysis),
     }
 
 
@@ -423,6 +523,8 @@ async def generate_target(
     except (TypeError, ValueError, json.JSONDecodeError) as error:
         raise HTTPException(status_code=422, detail="Invalid face embedding.") from error
 
+    if len(submitted_key) != EMBEDDING_DIMENSION:
+        raise HTTPException(status_code=422, detail="Face embedding must contain 256 values.")
     if submitted_key != pending_key:
         raise HTTPException(status_code=409, detail="Face embedding does not match temporary scan.")
 
@@ -462,7 +564,7 @@ async def generate_target(
         is_name_editable=scan_mode == "selfie",
         **profile_data,
     )
-    targets[target_id] = StoredTarget(embedding_keys=[pending_key], profile=profile)
+    create_stored_target(profile, pending_key, scan_mode)
     pending_scans.pop(temporary_scan_id, None)
     return {
         "status": "SUCCESS",

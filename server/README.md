@@ -1,8 +1,9 @@
 # Backend
 
-The backend keeps targets in memory. Restarting the server clears all generated
-targets. New targets can use OpenAI vision to generate an RPG profile from the
-scan image; no image is written to disk or stored in a database.
+The backend supports two storage modes. With Supabase credentials it persists
+targets and face embeddings in PostgreSQL + pgvector. Without credentials it
+uses the memory backend for local tests. New targets can use OpenAI vision to
+generate an RPG profile; raw scan images are never written to disk or database.
 
 ## Run
 
@@ -12,13 +13,19 @@ From the repository root:
 source .venv/bin/activate
 pip install -r server/requirements.txt
 cp server/.env.example server/.env
-# Edit server/.env and set OPENAI_API_KEY before starting.
+# Edit server/.env and set OpenAI/Supabase values before starting.
 uvicorn server.main:app --reload --host 0.0.0.0 --port 8000
 ```
 
 `OPENAI_MODEL` defaults to `gpt-5.5`. Without `OPENAI_API_KEY`, profile
 generation falls back to the local mock profile so development and tests still
 work.
+
+Run the Supabase migration, set `STORAGE_BACKEND=supabase`, and configure
+`SUPABASE_URL` plus the server-only `SUPABASE_SERVICE_ROLE_KEY` to enable
+permanent storage. See
+[`supabase/README.md`](../supabase/README.md) for the web-dashboard setup and
+Table Editor instructions. Never expose the service-role key to the frontend.
 
 The API documentation is available at `http://localhost:8000/docs`.
 
@@ -54,6 +61,10 @@ highest cosine similarity:
 Confirming a possible match adds the current embedding as another face variant
 for that target. The thresholds are initial prototype values and should be
 calibrated with real-device samples.
+
+Supabase stores 256-dimensional embeddings, matching the current on-device
+MobileFaceNet output. The HNSW index and RPC query use cosine distance. Up to
+eight recent embedding variants are retained per target.
 
 Base power, level, threat, and attributes remain attached to the identity.
 `scan_title`, equipment, style, pose, items, status, and current power are
