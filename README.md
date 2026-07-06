@@ -15,8 +15,8 @@
 ## English
 
 BountyFace is a cyberpunk RPG scanner. Identity is matched from an on-device
-face embedding. A temporary scan image is used only to generate the current AI
-codename, visible equipment, style, pose, and gameplay bonuses.
+face embedding. A temporary scan image is used only to generate the per-scan
+current title, visible equipment, style, pose, description, and gameplay bonuses.
 
 ### Current Implementation
 
@@ -33,13 +33,13 @@ Studio at `http://127.0.0.1:54323`. See [`supabase/README.md`](supabase/README.m
 
 ### Data Model
 
-Identity-bound base profile:
+Identity-bound permanent profile (stored in `targets` table):
 
 ```json
 {
   "id": "target-uuid",
-  "display_name": "Anonymous target",
-  "codename": "Current AI codename",
+  "display_name": "Anonymous",
+  "special_title": "",
   "base_power": 9842,
   "threat_level": "S",
   "level": 87,
@@ -47,17 +47,18 @@ Identity-bound base profile:
   "dex": 91,
   "int": 35,
   "luk": 99,
-  "description": "Persistent base character description.",
   "is_public_figure": false,
-  "is_name_editable": false
+  "is_verified": false,
+  "is_name_editable": true
 }
 ```
 
-Per-scan result:
+Per-scan result (AI-generated, never stored in DB):
 
 ```json
 {
-  "scan_title": "Thunder Vanguard",
+  "current_title": "Thunder Vanguard",
+  "current_description": "A swift shadow in the neon rain.",
   "equipment_bonus": 350,
   "style_bonus": 120,
   "pose_bonus": 80,
@@ -73,7 +74,7 @@ current_power = base_power + equipment_bonus + style_bonus + pose_bonus
 
 The AI chooses categorical equipment/style/pose tiers. FastAPI converts those
 tiers to deterministic bonus values. Base stats never change during a loadout
-rescan.
+rescan. `special_title` is admin-assigned and never modified by AI.
 
 ### Identity Matching
 
@@ -92,13 +93,13 @@ a possible match also adds the new embedding to that target.
 ### Display Name Rules
 
 ```text
-Selfie Mode: new display_name="匿名", editable only in Selfie Mode
-Field Mode:  new display_name="匿名目標", never editable by the scanner
-Public/Admin: fixed display_name, never editable
+Selfie Mode: new display_name="匿名"    editable=true   verified=false
+Field Mode:  new display_name="匿名目標" editable=false  verified=false
+Public/Admin: fixed display_name        editable=false  verified=true
 ```
 
-`display_name` is user/admin-owned. `codename` is AI-generated and may change
-with the current equipment and appearance.
+`display_name` is user/admin-owned. `special_title` is admin-assigned.
+`current_title` is AI-generated per scan and returned in `scan_result`.
 
 ### API
 
@@ -200,7 +201,8 @@ Response:
   "generationSource": "ai",
   "profile": { "id": "target-uuid", "base_power": 9842 },
   "scan_result": {
-    "scan_title": "Thunder Vanguard",
+    "current_title": "Thunder Vanguard",
+    "current_description": "A swift shadow in the neon rain.",
     "equipment_bonus": 350,
     "style_bonus": 120,
     "pose_bonus": 80,
@@ -238,13 +240,80 @@ Returns the new base `profile` and first `scan_result`. `generationSource` is
 Only an editable, non-public target can be renamed, and only from Selfie Mode.
 Field, public-figure, and admin rename attempts return `403`.
 
+### Publishing (AltStore / SideStore)
+
+BountyFace is an open-source side project — no App Store, no Apple Developer
+Program fees. Distribute via AltStore or SideStore.
+
+#### Architecture
+
+```text
+Cloud
+├── FastAPI (Supabase Cloud)
+├── Supabase (PostgreSQL + pgvector)
+└── OpenAI (GPT-5.5)
+
+Client
+├── Android → APK (direct install)
+└── iPhone  → IPA via AltStore / SideStore
+```
+
+#### iPhone: Build & Install
+
+1. **Build the IPA**
+
+   ```bash
+   cd frontend
+   npx eas build --platform ios --profile production
+   ```
+
+   EAS Build produces a signed `.ipa` file.
+
+2. **Install AltStore**
+
+   - Install [AltServer](https://altstore.io) on your Mac/PC.
+   - Connect your iPhone via USB.
+   - Use AltServer to install AltStore onto your iPhone.
+   - Sign in with your personal Apple ID (free account works).
+
+3. **Install BountyFace**
+
+   - Share the `.ipa` to your iPhone (AirDrop, Files, or any method).
+   - Open the file in AltStore → **Install**.
+
+   The app refreshes every 7 days (free Apple ID limit). AltStore
+   auto-refreshes when your iPhone is on the same Wi-Fi as AltServer.
+
+#### Android: Build & Install
+
+```bash
+cd frontend
+npx eas build --platform android --profile production
+```
+
+Download the `.apk` and install directly on your Android device.
+
+#### For Friends
+
+Your friends follow the same steps: install AltStore → sign in with their
+own Apple ID → install your IPA. No developer account needed.
+
+#### Limitations (Free Apple ID)
+
+- App signature expires after 7 days (AltStore auto-refreshes).
+- Limited number of sideloaded apps (typically 3).
+- Acceptable for testing and side-project distribution.
+
+For larger audiences, consider Apple Developer Program ($99/year) for
+TestFlight or App Store distribution.
+
 ---
 
 ## 繁體中文
 
 BountyFace 是賽博龐克 RPG 掃描器。身份判斷以 iPhone 本機產生的 Face
-Embedding 為主；暫時掃描照片只用來分析當次 AI 稱號、可見裝備、服裝、姿勢與
-遊戲加成。
+Embedding 為主；暫時掃描照片只用來分析當次 AI 稱號、可見裝備、服裝、姿勢、
+描述與遊戲加成。
 
 ### 目前實作
 
@@ -262,30 +331,21 @@ Embedding 為主；暫時掃描照片只用來分析當次 AI 稱號、可見裝
 
 ### 資料分層
 
-身份固定資料：
+永久資料（存於 `targets` 資料表）：
 
 ```text
-display_name
-base_power
-threat_level
-level
-STR / DEX / INT / LUK
-description
-is_public_figure
-is_name_editable
+display_name          special_title          base_power
+threat_level          level                  STR / DEX / INT / LUK
+is_public_figure      is_verified            is_name_editable
 最多八組 face embeddings
 ```
 
-每次掃描重新計算：
+每次掃描重新計算（AI 即時產生，不存 DB）：
 
 ```text
-codename / scan_title
-equipment_bonus
-style_bonus
-pose_bonus
-current_power
-detected_items
-current_status
+current_title          current_description
+equipment_bonus        style_bonus            pose_bonus
+current_power          detected_items         current_status
 ```
 
 ```text
@@ -293,7 +353,7 @@ current_power = base_power + equipment_bonus + style_bonus + pose_bonus
 ```
 
 AI 只回傳裝備、服裝與姿勢的固定 tier；真正 bonus 由 FastAPI 的固定表格換算，
-避免模型每次自由產生不同加成。
+避免模型每次自由產生不同加成。`special_title` 為管理員手動設定，AI 永遠不會修改。
 
 ### 身份比對規則
 
@@ -312,13 +372,80 @@ Confirm 後會把這次 embedding 加入該人物。高相似度 Confirmed Match
 ### 顯示名稱權限
 
 ```text
-Selfie Mode：新人物 display_name="匿名"，只能在 Selfie Mode 修改
-Field Mode： 新人物 display_name="匿名目標"，掃描者不能修改
-Public/Admin：固定 display_name，永遠不能修改
+Selfie Mode：新人物 display_name="匿名"    editable=true   verified=false
+Field Mode： 新人物 display_name="匿名目標" editable=false  verified=false
+Public/Admin：固定 display_name            editable=false  verified=true
 ```
 
-`display_name` 是使用者／管理員擁有的固定名稱；`codename` 是 AI 依當次裝備與
-外觀重新產生的稱號。
+`display_name` 是使用者／管理員擁有的固定名稱。`special_title` 由管理員設定。
+`current_title` 由 AI 每次掃描產生，僅存在 `scan_result` 中。
+
+### 發布方式（AltStore / SideStore）
+
+BountyFace 是開源 Side Project — 不需 App Store、不需 Apple Developer 年費，
+透過 AltStore 或 SideStore 發布即可。
+
+#### 架構
+
+```text
+Cloud
+├── FastAPI（Supabase Cloud）
+├── Supabase（PostgreSQL + pgvector）
+└── OpenAI（GPT-5.5）
+
+Client
+├── Android → APK 直接安裝
+└── iPhone  → IPA 透過 AltStore / SideStore 安裝
+```
+
+#### iPhone：編譯與安裝
+
+1. **編譯 IPA**
+
+   ```bash
+   cd frontend
+   npx eas build --platform ios --profile production
+   ```
+
+   EAS Build 會產生簽署好的 `.ipa` 檔案。
+
+2. **安裝 AltStore**
+
+   - 在 Mac/PC 安裝 [AltServer](https://altstore.io)。
+   - iPhone 用 USB 連接電腦。
+   - 透過 AltServer 將 AltStore 安裝到 iPhone。
+   - 用自己的 Apple ID 登入（免費帳號即可）。
+
+3. **安裝 BountyFace**
+
+   - 將 `.ipa` 傳到 iPhone（AirDrop、Files 等方式）。
+   - 在 AltStore 中開啟 → **Install**。
+
+   App 每 7 天需重新簽署（免費 Apple ID 限制）。AltStore 在 iPhone 與
+   AltServer 同 Wi-Fi 時會自動更新。
+
+#### Android：編譯與安裝
+
+```bash
+cd frontend
+npx eas build --platform android --profile production
+```
+
+下載 `.apk` 後直接在 Android 裝置上安裝。
+
+#### 給朋友玩
+
+朋友也照相同流程：安裝 AltStore → 用自己的 Apple ID 登入 → 安裝你的 IPA。
+完全不需要 Developer 帳號。
+
+#### 免費 Apple ID 限制
+
+- App 簽章 7 天後過期（AltStore 自動更新）。
+- 可安裝的自簽 App 數量有限（通常 3 個）。
+- 對測試與 Side Project 發布來說完全夠用。
+
+未來使用者變多時，可考慮加入 Apple Developer Program（$99/年），使用
+TestFlight 或正式上架 App Store。
 
 ### API Design
 
@@ -359,8 +486,8 @@ Public/Admin：固定 display_name，永遠不能修改
 
 `POST /v1/targets/{targetId}/analyze`
 
-使用 `multipart/form-data` 上傳 `scanImage`。Base Profile 不變，只更新 AI Codename、
-裝備／服裝／姿勢加成、可見物品、狀態與 Current Power。
+使用 `multipart/form-data` 上傳 `scanImage`。Base Profile 不變，只更新 current_title、
+裝備／服裝／姿勢加成、描述、可見物品、狀態與 Current Power。
 
 #### 建立新人物
 
