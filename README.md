@@ -275,11 +275,16 @@ Client
    - Connect your iPhone via USB.
    - Use AltServer to install AltStore onto your iPhone.
    - Sign in with your personal Apple ID (free account works).
+   - **Enable Developer Mode:** Settings → Privacy & Security →
+     Developer Mode (at the bottom). Restart iPhone to activate.
+     If not visible, connect to Xcode once to unlock the option.
 
 3. **Install BountyFace**
 
    - Share the `.ipa` to your iPhone (AirDrop, Files, or any method).
    - Open the file in AltStore → **Install**.
+   - **Trust the certificate:** Settings → General → VPN & Device
+     Management → tap your developer profile → Trust.
 
    The app refreshes every 7 days (free Apple ID limit). AltStore
    auto-refreshes when your iPhone is on the same Wi-Fi as AltServer.
@@ -293,19 +298,55 @@ npx eas build --platform android --profile production
 
 Download the `.apk` and install directly on your Android device.
 
+#### iOS: Direct Dev Build (via Xcode)
+
+For your own device during development, skip AltStore and install directly:
+
+```bash
+cd frontend
+npx expo run:ios --device --configuration Release
+```
+
 #### For Friends
 
 Your friends follow the same steps: install AltStore → sign in with their
-own Apple ID → install your IPA. No developer account needed.
+own Apple ID → enable Developer Mode → install your IPA → trust certificate.
+No developer account needed.
 
 #### Limitations (Free Apple ID)
 
 - App signature expires after 7 days (AltStore auto-refreshes).
 - Limited number of sideloaded apps (typically 3).
+- Developer Mode must remain enabled on the device.
 - Acceptable for testing and side-project distribution.
 
 For larger audiences, consider Apple Developer Program ($99/year) for
 TestFlight or App Store distribution.
+
+### Backend Deployment (Cloud Run)
+
+```bash
+# One-time setup
+gcloud auth login
+gcloud config set project YOUR_PROJECT_ID
+gcloud services enable run.googleapis.com artifactregistry.googleapis.com cloudbuild.googleapis.com iam.googleapis.com
+
+# Deploy
+cd server
+gcloud run deploy bountyface-backend \
+  --source . \
+  --region asia-east1 \
+  --allow-unauthenticated \
+  --max-instances 1 \
+  --set-env-vars "STORAGE_BACKEND=supabase,SUPABASE_URL=...,SUPABASE_SERVICE_ROLE_KEY=...,OPENAI_API_KEY=...,OPENAI_MODEL=gpt-5.5"
+
+# Update env vars only
+gcloud run services update bountyface-backend \
+  --region asia-east1 \
+  --update-env-vars OPENAI_API_KEY=new_key
+```
+
+Then update `frontend/.env.local` to the Cloud Run URL and rebuild.
 
 ---
 
@@ -415,14 +456,28 @@ Client
    - iPhone 用 USB 連接電腦。
    - 透過 AltServer 將 AltStore 安裝到 iPhone。
    - 用自己的 Apple ID 登入（免費帳號即可）。
+   - **開啟開發者模式：** 設定 → 隱私權與安全性 → 開發者模式（最底部）。
+     重新啟動 iPhone 啟用。若看不到此選項，先連接 Xcode 一次即可解鎖。
 
 3. **安裝 BountyFace**
 
    - 將 `.ipa` 傳到 iPhone（AirDrop、Files 等方式）。
    - 在 AltStore 中開啟 → **Install**。
+   - **信任憑證：** 設定 → 一般 → VPN 與裝置管理 → 點你的開發者檔案 → 信任。
 
    App 每 7 天需重新簽署（免費 Apple ID 限制）。AltStore 在 iPhone 與
    AltServer 同 Wi-Fi 時會自動更新。
+
+#### iOS：直接安裝（Xcode USB）
+
+開發時可用 USB 直接安裝自己的手機，不需 AltStore：
+
+```bash
+cd frontend
+npx expo run:ios --device --configuration Release
+```
+
+若多台裝置名稱相同，改用裝置 UDID 指定。
 
 #### Android：編譯與安裝
 
@@ -435,17 +490,43 @@ npx eas build --platform android --profile production
 
 #### 給朋友玩
 
-朋友也照相同流程：安裝 AltStore → 用自己的 Apple ID 登入 → 安裝你的 IPA。
-完全不需要 Developer 帳號。
+朋友也照相同流程：安裝 AltStore → 用自己的 Apple ID 登入 → 開啟開發者模式 →
+安裝你的 IPA → 信任憑證。完全不需要 Developer 帳號。
 
 #### 免費 Apple ID 限制
 
 - App 簽章 7 天後過期（AltStore 自動更新）。
 - 可安裝的自簽 App 數量有限（通常 3 個）。
+- 開發者模式必須保持開啟。
 - 對測試與 Side Project 發布來說完全夠用。
 
 未來使用者變多時，可考慮加入 Apple Developer Program（$99/年），使用
 TestFlight 或正式上架 App Store。
+
+### 後端部署（Cloud Run）
+
+```bash
+# 初次設定
+gcloud auth login
+gcloud config set project YOUR_PROJECT_ID
+gcloud services enable run.googleapis.com artifactregistry.googleapis.com cloudbuild.googleapis.com iam.googleapis.com
+
+# 部署
+cd server
+gcloud run deploy bountyface-backend \
+  --source . \
+  --region asia-east1 \
+  --allow-unauthenticated \
+  --max-instances 1 \
+  --set-env-vars "STORAGE_BACKEND=supabase,SUPABASE_URL=...,SUPABASE_SERVICE_ROLE_KEY=...,OPENAI_API_KEY=...,OPENAI_MODEL=gpt-5.5"
+
+# 單獨更新環境變數
+gcloud run services update bountyface-backend \
+  --region asia-east1 \
+  --update-env-vars OPENAI_API_KEY=new_key
+```
+
+部署完後將 `frontend/.env.local` 的 URL 改為 Cloud Run 網址，rebuild App 即可。
 
 ### API Design
 
