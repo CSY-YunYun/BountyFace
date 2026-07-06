@@ -9,6 +9,7 @@ steps:
       - --region=${_REGION}
       - --allow-unauthenticated
       - --max-instances=1
+      - --clear-base-image
 
 options:
   logging: CLOUD_LOGGING_ONLY
