@@ -10,6 +10,9 @@ steps:
       - --allow-unauthenticated
       - --max-instances=1
 
+options:
+  logging: CLOUD_LOGGING_ONLY
+
 substitutions:
   _REGION: asia-east1
   _SERVICE: bountyface-backend
