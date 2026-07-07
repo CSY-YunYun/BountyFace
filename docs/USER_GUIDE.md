@@ -28,7 +28,7 @@ power rating, and a dynamic title based on what they're wearing and how they sta
 
 Switch modes using the **SELFIE / FIELD** buttons at the top of the screen.
 
-<img src="images/profile-card-selfie.PNG" width="300" alt="Profile card — Selfie Mode" />
+<img src="images/profile-card-selfie.jpg" width="300" alt="Profile card — Selfie Mode" />
 
 ### Understanding the Screen
 
