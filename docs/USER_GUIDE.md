@@ -28,7 +28,7 @@ power rating, and a dynamic title based on what they're wearing and how they sta
 
 Switch modes using the **SELFIE / FIELD** buttons at the top of the screen.
 
-![Profile card — Selfie Mode](images/profile-card-selfie.png)
+<img src="images/profile-card-selfie.PNG" width="300" alt="Profile card — Selfie Mode" />
 
 ### Understanding the Screen
 
@@ -41,7 +41,7 @@ Switch modes using the **SELFIE / FIELD** buttons at the top of the screen.
   - `Face the camera / 請面對鏡頭` — Turn toward the camera
   - `Identity ready / 身份鎖定` — Face locked, analyzing
 
-  ![Profile card — Selfie Mode](images/canning-frame.PNG)
+  <img src="images/scanning-frame.PNG" width="300" alt="Scanning frame" />
 
 
 
@@ -63,7 +63,7 @@ Switch modes using the **SELFIE / FIELD** buttons at the top of the screen.
 | **ITEMS** | Detected visible items |
 | **STATUS** | Current combat status description |
 
-![Profile card — Selfie Mode](images/Profile-Card.PNG)
+<img src="images/Profile-Card.PNG" width="300" alt="Profile Card" />
 
 ### Possible Match
 
@@ -72,7 +72,7 @@ If the app finds a similar face, it shows a **POSSIBLE MATCH** panel:
 - **CONFIRM** — This IS the same person. Adds their new look to the profile.
 - **CREATE NEW** — This is a different person. Creates a new character.
 
-![Profile card — Selfie Mode](images/possible_match.PNG)
+<img src="images/possible-match.PNG" width="300" alt="Possible Match" />
 
 
 ### Changing Your Display Name (Selfie Mode Only)
@@ -81,7 +81,7 @@ If the app finds a similar face, it shows a **POSSIBLE MATCH** panel:
 2. After the profile card appears, tap **EDIT** next to your display name.
 3. Enter your new name and tap **SAVE**.
 
-![Profile card — Selfie Mode](images/edit-name.PNG)
+<img src="images/edit-name.PNG" width="300" alt="Edit name" />
 
 > Only selfie-created characters can be renamed. Field scans and public figures cannot.
 
