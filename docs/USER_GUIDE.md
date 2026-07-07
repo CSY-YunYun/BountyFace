@@ -72,7 +72,7 @@ If the app finds a similar face, it shows a **POSSIBLE MATCH** panel:
 - **CONFIRM** — This IS the same person. Adds their new look to the profile.
 - **CREATE NEW** — This is a different person. Creates a new character.
 
-<img src="images/possible-match.PNG" width="300" alt="Possible Match" />
+<img src="images/possible-match.png" width="300" alt="Possible Match" />
 
 
 ### Changing Your Display Name (Selfie Mode Only)
