@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import Annotated, Any, Literal
 from uuid import uuid4
 
-from fastapi import FastAPI, File, Form, HTTPException, UploadFile
+from fastapi import Depends, FastAPI, File, Form, HTTPException, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from openai import AsyncOpenAI
 from pydantic import BaseModel, ConfigDict, Field
@@ -127,6 +127,7 @@ POSE_BONUSES = {"neutral": 0, "ready": 40, "dynamic": 80, "dominant": 140}
 SUPABASE_URL = os.getenv("SUPABASE_URL", "").strip()
 SUPABASE_SERVICE_ROLE_KEY = os.getenv("SUPABASE_SERVICE_ROLE_KEY", "").strip()
 STORAGE_BACKEND = os.getenv("STORAGE_BACKEND", "memory").strip().lower()
+API_KEY = os.getenv("API_KEY", "").strip()
 
 if STORAGE_BACKEND not in {"memory", "supabase"}:
     raise RuntimeError("STORAGE_BACKEND must be either 'memory' or 'supabase'.")
@@ -140,6 +141,14 @@ supabase: Any = (
     if STORAGE_BACKEND == "supabase" and create_client is not None
     else None
 )
+
+
+async def require_api_key(request: Request):
+    if not API_KEY:
+        return  # No key configured — allow all requests (dev mode)
+    key = request.headers.get("X-API-Key", "")
+    if key != API_KEY:
+        raise HTTPException(status_code=401, detail="Invalid or missing API key.")
 
 
 def embedding_key(embedding: list[float]) -> tuple[float, ...]:
@@ -380,7 +389,7 @@ def health_check():
 
 
 @app.post("/v1/scan")
-def scan_target(request: ScanRequest):
+def scan_target(request: ScanRequest, _: None = Depends(require_api_key)):
     key = embedding_key(request.face_embedding)
     best_confidence = 0.0
     best_match = find_best_embedding_match(key)
@@ -431,7 +440,7 @@ def scan_target(request: ScanRequest):
 
 
 @app.get("/v1/targets/{target_id}")
-def get_target(target_id: str):
+def get_target(target_id: str, _: None = Depends(require_api_key)):
     profile = get_stored_profile(target_id)
     if profile is None:
         raise HTTPException(status_code=404, detail="Target not found.")
@@ -439,7 +448,7 @@ def get_target(target_id: str):
 
 
 @app.patch("/v1/targets/{target_id}")
-def update_target_display_name(target_id: str, request: UpdateDisplayNameRequest):
+def update_target_display_name(target_id: str, request: UpdateDisplayNameRequest, _: None = Depends(require_api_key)):
     profile = get_stored_profile(target_id)
     if profile is None:
         raise HTTPException(status_code=404, detail="Target not found.")
@@ -457,7 +466,7 @@ def update_target_display_name(target_id: str, request: UpdateDisplayNameRequest
 
 
 @app.post("/v1/targets/{target_id}/confirm")
-def confirm_target_match(target_id: str, request: ConfirmMatchRequest):
+def confirm_target_match(target_id: str, request: ConfirmMatchRequest, _: None = Depends(require_api_key)):
     profile = get_stored_profile(target_id)
     if profile is None:
         raise HTTPException(status_code=404, detail="Target not found.")
@@ -474,7 +483,7 @@ def confirm_target_match(target_id: str, request: ConfirmMatchRequest):
 
 
 @app.post("/v1/targets/{target_id}/analyze")
-async def analyze_target(target_id: str, scan_image: Annotated[UploadFile, File(alias="scanImage")]):
+async def analyze_target(target_id: str, scan_image: Annotated[UploadFile, File(alias="scanImage")], _: None = Depends(require_api_key)):
     profile = get_stored_profile(target_id)
     if profile is None:
         raise HTTPException(status_code=404, detail="Target not found.")
@@ -511,6 +520,7 @@ async def generate_target(
     face_embedding: Annotated[str, Form(alias="faceEmbedding")],
     scan_mode: Annotated[Literal["selfie", "field"], Form(alias="scanMode")],
     scan_image: Annotated[UploadFile | None, File(alias="scanImage")] = None,
+    _: None = Depends(require_api_key),
 ):
     pending_key = pending_scans.get(temporary_scan_id)
     if pending_key is None:
