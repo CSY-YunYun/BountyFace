@@ -2,6 +2,8 @@
 
 [English](#english) | [繁體中文](#繁體中文)
 
+> 📱 **[User Guide (with screenshots) / 使用手冊（含截圖）→](docs/USER_GUIDE.md)**
+
 ## Project Structure
 
 - Frontend: [`frontend`](frontend)
