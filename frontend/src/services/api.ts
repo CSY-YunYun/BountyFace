@@ -1,4 +1,20 @@
 const API_URL = process.env.EXPO_PUBLIC_API_URL ?? 'http://127.0.0.1:8000';
+const API_KEY = process.env.EXPO_PUBLIC_API_KEY ?? '';
+
+async function requestJson<T>(path: string, options?: RequestInit): Promise<T> {
+  const headers: Record<string, string> = {
+    ...(options?.headers as Record<string, string> ?? {}),
+  };
+  if (API_KEY) {
+    headers['X-API-Key'] = API_KEY;
+  }
+  const response = await fetch(`${API_URL}${path}`, { ...options, headers });
+  if (!response.ok) {
+    const message = await response.text();
+    throw new Error(message || `API request failed with status ${response.status}`);
+  }
+  return response.json() as Promise<T>;
+}
 
 export type ApiTargetProfile = {
   id: string;
@@ -53,15 +69,6 @@ type AnalyzeResponse = ProfileResponse & {
   generationSource: 'ai' | 'mock';
   scan_result: ApiScanResult;
 };
-
-async function requestJson<T>(path: string, options?: RequestInit): Promise<T> {
-  const response = await fetch(`${API_URL}${path}`, options);
-  if (!response.ok) {
-    const message = await response.text();
-    throw new Error(message || `API request failed with status ${response.status}`);
-  }
-  return response.json() as Promise<T>;
-}
 
 export function scanFace(faceEmbedding: number[], signal?: AbortSignal) {
   return requestJson<ScanResponse>('/v1/scan', {
