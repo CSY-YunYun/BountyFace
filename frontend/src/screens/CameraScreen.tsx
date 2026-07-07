@@ -171,7 +171,7 @@ const STATUS_COPY: Record<ScanStatus, string> = {
   faceDetected: 'Checking face quality...',
   faceLocked: 'Face locked',
   tracking: 'Target tracking',
-  lostTracking: 'Signal lost...',
+  lostTracking: 'Face lost / 失去目標',
   analyzing: 'Analyzing target...',
   possibleMatch: 'Possible identity match',
   completed: 'Scan completed',
@@ -245,7 +245,7 @@ export function CameraScreen() {
   const camera = useRef<Camera>(null);
   const [permissionChecked, setPermissionChecked] = useState(false);
   const [scanStatus, setScanStatus] = useState<ScanStatus>('searchingFace');
-  const [qualityMessage, setQualityMessage] = useState('Find a clear face');
+  const [qualityMessage, setQualityMessage] = useState('Look at camera / 看向鏡頭');
   const [faceBounds, setFaceBounds] = useState<FaceBounds | null>(null);
   const [poseLandmarks, setPoseLandmarks] = useState<PoseLandmark[]>([]);
   const [poseQuality, setPoseQuality] = useState<PoseQuality>(EMPTY_POSE_QUALITY);
@@ -274,7 +274,7 @@ export function CameraScreen() {
     stableSince.current = null;
     lastValidFaceAt.current = null;
     setScanStatus('searchingFace');
-    setQualityMessage('Find a clear face');
+    setQualityMessage('Look at camera / 看向鏡頭');
     setFaceBounds(null);
     setPoseLandmarks([]);
     setPoseQuality(EMPTY_POSE_QUALITY);
@@ -577,7 +577,7 @@ export function CameraScreen() {
     setScanResult(null);
     setScanSource(null);
     setPossibleMatch(null);
-    setQualityMessage('Hold still for a new loadout scan');
+    setQualityMessage('Hold still / 保持不動重新掃描');
     setScanStatus('searchingFace');
   }, []);
 
@@ -627,7 +627,7 @@ export function CameraScreen() {
       setScanResult(null);
       setScanSource(null);
       analysisAttempted.current = false;
-      setQualityMessage('Find a clear face');
+      setQualityMessage('Look at camera / 看向鏡頭');
       setScanStatus('searchingFace');
     }, LOST_TRACKING_TIMEOUT_MS);
 
@@ -644,7 +644,7 @@ export function CameraScreen() {
     if (scanStatus === 'lostTracking') {
       if (face) {
         setFaceBounds(face.bounds);
-        setQualityMessage('Target reacquired');
+        setQualityMessage('Target found / 重新鎖定');
         setScanStatus('tracking');
       }
       return;
@@ -660,7 +660,7 @@ export function CameraScreen() {
       if (!mockProfile) {
         analysisAttempted.current = false;
       }
-      setQualityMessage('Signal lost');
+      setQualityMessage('Face lost / 失去目標');
       setScanStatus('lostTracking');
       return;
     }
@@ -678,7 +678,7 @@ export function CameraScreen() {
       lastValidFaceAt.current = null;
       setFaceBounds(null);
       setScanStatus('searchingFace');
-      setQualityMessage('Find a clear face');
+      setQualityMessage('Look at camera / 看向鏡頭');
       return;
     }
 
@@ -693,7 +693,7 @@ export function CameraScreen() {
     if (!faceIsLargeEnough) {
       stableSince.current = null;
       lastValidFaceAt.current = null;
-      setQualityMessage('Move closer');
+      setQualityMessage('Move closer / 靠近一點');
       return;
     }
 
@@ -713,7 +713,7 @@ export function CameraScreen() {
       if (withinQualityGrace) return;
       stableSince.current = null;
       lastValidFaceAt.current = null;
-      setQualityMessage('Move face toward center');
+      setQualityMessage('Center face / 臉置中');
       return;
     }
 
@@ -721,16 +721,16 @@ export function CameraScreen() {
       if (withinQualityGrace) return;
       stableSince.current = null;
       lastValidFaceAt.current = null;
-      setQualityMessage('Turn slightly toward camera');
+      setQualityMessage('Face the camera / 請面對鏡頭');
       return;
     }
 
-    setQualityMessage('Hold still');
+    setQualityMessage('Hold still / 保持不動');
     const now = Date.now();
     lastValidFaceAt.current = now;
     stableSince.current ??= now;
     if (now - stableSince.current >= REQUIRED_STABLE_MS) {
-      setQualityMessage('Identity ready');
+      setQualityMessage('Identity ready / 身份鎖定');
       setScanStatus('faceLocked');
       return;
     }
@@ -766,7 +766,7 @@ export function CameraScreen() {
         return;
       }
       if (quality && quality.sharpness < MIN_FACE_SHARPNESS) {
-        setQualityMessage('Hold still · image blurred');
+        setQualityMessage('Blur detected / 畫面模糊，保持不動');
         return;
       }
       setFaceEmbedding(result.embedding);
